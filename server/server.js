@@ -14,6 +14,50 @@ app.use(
 );
 app.use(express.json());
 
+const MONGODB_URI =
+  process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/luna';
+
+// Serverless-friendly connection caching: Vercel may reuse the same process
+// across invocations (warm starts), so we cache the connection promise on
+// `global` to avoid reconnecting on every request, which is slow and can
+// exhaust MongoDB's connection limit.
+let cachedConnectionPromise = global._lunaMongoosePromise;
+
+function connectToDatabase() {
+  if (!cachedConnectionPromise) {
+    cachedConnectionPromise = mongoose
+      .connect(MONGODB_URI)
+      .then((m) => {
+        console.log('[luna] connected to MongoDB');
+        return m;
+      })
+      .catch((err) => {
+        console.error(`[luna] MongoDB connection failed: ${err.message}`);
+        // Reset so the next request can retry instead of being stuck forever
+        // on a rejected promise.
+        cachedConnectionPromise = null;
+        global._lunaMongoosePromise = null;
+        throw err;
+      });
+    global._lunaMongoosePromise = cachedConnectionPromise;
+  }
+  return cachedConnectionPromise;
+}
+
+// Ensure the DB is connected before handling any request, instead of at
+// module load time. This MUST come before the routes below so every request
+// waits for a live connection first.
+app.use(async (req, res, next) => {
+  try {
+    await connectToDatabase();
+    next();
+  } catch (err) {
+    res.status(503).json({
+      message: 'Could not reach the database. Please try again shortly.',
+    });
+  }
+});
+
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', uptime: process.uptime() });
 });
@@ -39,23 +83,15 @@ app.use((err, req, res, next) => {
   res.status(err.status || 500).json({ message: 'Something went wrong on the server.' });
 });
 
-const PORT = process.env.PORT || 5000;
-const MONGODB_URI =
-  process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/luna';
-
-async function start() {
-  try {
-    await mongoose.connect(MONGODB_URI);
-    console.log(`[luna] connected to MongoDB (${MONGODB_URI})`);
-  } catch (err) {
-    console.error(`[luna] MongoDB connection failed: ${err.message}`);
-    console.error('[luna] Start MongoDB locally or set MONGODB_URI in .env');
-    process.exit(1);
-  }
-
+// When running locally (e.g. `node server.js` or `node --watch server.js`),
+// start a normal listening server. On Vercel, this file is imported as a
+// module and the exported `app` is invoked per-request instead, so we only
+// call app.listen() outside of Vercel's serverless runtime.
+if (!process.env.VERCEL) {
+  const PORT = process.env.PORT || 5000;
   app.listen(PORT, () => {
     console.log(`[luna] API listening on http://localhost:${PORT}`);
   });
 }
 
-start();
+export default app;
