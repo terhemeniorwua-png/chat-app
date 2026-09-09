@@ -14,6 +14,46 @@ import {
 } from 'lucide-react';
 import BrandMark from '@/components/BrandMark';
 
+const TABS = {
+  SIGN_IN: 'sign-in',
+  CREATE_ACCOUNT: 'create-account',
+};
+
+const USERS_KEY = 'luna_users';
+const SESSION_KEY = 'luna_current_user';
+
+const NAME_RE = /^[a-zA-Z\s-]+$/;
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const PASSWORD_RE =
+  /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&-_])[A-Za-z\d@$!%*?&-_]{5,}$/;
+
+const tabVariants = {
+  hidden: (tab) => ({
+    x: tab === TABS.SIGN_IN ? -28 : 28,
+    opacity: 0,
+    transition: { duration: 0 },
+  }),
+  visible: {
+    x: 0,
+    opacity: 1,
+    transition: { delay: 0.08, duration: 0.35, ease: 'easeOut' },
+  },
+};
+
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function readUsers() {
+  try {
+    const raw = localStorage.getItem(USERS_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
 function GoogleIcon({ className = '' }) {
   return (
     <svg viewBox="0 0 24 24" className={className} aria-hidden="true">
@@ -37,36 +77,34 @@ function GoogleIcon({ className = '' }) {
   );
 }
 
-function GithubIcon({ className = '' }) {
+function FieldError({ message }) {
+  if (!message) return null;
   return (
-    <svg viewBox="0 0 24 24" className={className} fill="currentColor" aria-hidden="true">
-      <path d="M12 1.5A10.5 10.5 0 0 0 8.43 22.1c.53.1.7-.23.7-.5v-1.7c-2.84.62-3.43-1.2-3.43-1.2-.47-1.18-1.13-1.5-1.13-1.5-.93-.63.07-.62.07-.62 1.02.07 1.56 1.05 1.56 1.05.91 1.56 2.39 1.11 2.98.85.09-.66.35-1.11.64-1.36-2.22-.25-4.56-1.11-4.56-4.94 0-1.09.39-1.99 1.03-2.69-.1-.25-.45-1.27.1-2.65 0 0 .84-.27 2.75 1.03a9.6 9.6 0 0 1 5 0c1.91-1.3 2.75-1.03 2.75-1.03.55 1.38.2 2.4.1 2.65.64.7 1.03 1.6 1.03 2.69 0 3.84-2.34 4.69-4.57 4.94.36.31.68.92.68 1.86v2.76c0 .27.17.6.7.5A10.5 10.5 0 0 0 12 1.5Z" />
-    </svg>
+    <motion.p
+      initial={{ opacity: 0, y: -2 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="mt-1.5 pl-1 text-xs font-medium text-[#EF4444]"
+    >
+      {message}
+    </motion.p>
   );
 }
 
-const TABS = {
-  SIGN_IN: 'sign-in',
-  CREATE_ACCOUNT: 'create-account',
-};
-
-const tabVariants = {
-  hidden: (tab) => ({
-    x: tab === TABS.SIGN_IN ? -28 : 28,
-    opacity: 0,
-    transition: { duration: 0 },
-  }),
-  visible: {
-    x: 0,
-    opacity: 1,
-    transition: { delay: 0.08, duration: 0.35, ease: 'easeOut' },
-  },
-};
+function inputClass(hasError) {
+  return [
+    'w-full rounded-xl border bg-gray-800/70 py-2.5 pl-10 pr-10 text-sm text-gray-100 placeholder-gray-500 outline-none transition focus:ring-2 sm:pr-10',
+    hasError
+      ? 'border-[#EF4444]/70 focus:border-[#EF4444] focus:ring-[#EF4444]/30'
+      : 'border-gray-700/80 focus:border-[#7C3AED] focus:ring-[#7C3AED]/40',
+  ].join(' ');
+}
 
 /**
- * Full panel for /auth: brand lockup, Sign In / Create Account switcher,
- * and simulated auth that routes new users to /onboarding and returning
- * users straight to /dashboard.
+ * Full panel for /auth: brand lockup, Sign In / Create Account switcher, and
+ * localStorage-backed auth. New accounts are stored under `luna_users`, the
+ * active session under `luna_current_user`:
+ *   - Sign In  -> /dashboard (returning users)
+ *   - Signup   -> /onboarding (new users)
  *
  * @param {object} props
  * @param {boolean} [props.initialCreate=false] - start with the Create Account tab.
@@ -74,37 +112,159 @@ const tabVariants = {
 export default function AuthGateway({ initialCreate = false }) {
   const [tab, setTab] = useState(initialCreate ? TABS.CREATE_ACCOUNT : TABS.SIGN_IN);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
+  const [authError, setAuthError] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [values, setValues] = useState({
+    fullName: '',
+    email: '',
+    password: '',
+    confirmPassword: '',
+  });
+  const [fieldErrors, setFieldErrors] = useState({});
   const router = useRouter();
 
   const isSignIn = tab === TABS.SIGN_IN;
 
-  async function handleSubmit(e) {
+  function setValue(field, value) {
+    setValues((prev) => ({ ...prev, [field]: value }));
+    if (fieldErrors[field]) {
+      setFieldErrors((prev) => ({ ...prev, [field]: '' }));
+    }
+  }
+
+  function switchTab(value) {
+    setTab(value);
+    setFieldErrors({});
+    setAuthError('');
+    setLoading(false);
+  }
+
+  async function handleSignIn(e) {
     e.preventDefault();
-    setError('');
+    setAuthError('');
     setLoading(true);
 
+    const email = values.email.trim();
+    const errors = {};
+
+    if (!email) {
+      errors.email = 'Email is required.';
+    } else if (!EMAIL_RE.test(email)) {
+      errors.email = 'Please enter a valid email address.';
+    }
+    if (!values.password) {
+      errors.password = 'Password is required.';
+    }
+
+    setFieldErrors(errors);
+    if (Object.keys(errors).length > 0) {
+      setLoading(false);
+      return;
+    }
+
     try {
-      await new Promise((resolve) => setTimeout(resolve, 1200));
+      await wait(800);
 
-      const isNewUser = !isSignIn;
+      const user = readUsers().find(
+        (u) => u.email.toLowerCase() === email.toLowerCase()
+      );
 
-      const query = new URLSearchParams({ isNewUser: String(isNewUser) });
-
-      if (isNewUser) {
-        router.push(`/onboarding?${query}`);
-      } else {
-        router.push(`/dashboard?${query}`);
+      if (!user || user.password !== values.password) {
+        setAuthError(
+          'Account does not exist or credentials are incorrect. Please create an account first.'
+        );
+        setLoading(false);
+        return;
       }
-    } catch (err) {
-      setError('Something went wrong. Please try again.');
+
+      localStorage.setItem(
+        SESSION_KEY,
+        JSON.stringify({ id: user.id, name: user.name, email: user.email })
+      );
+      router.push('/dashboard');
+    } catch {
+      setAuthError('Something went wrong. Please try again.');
       setLoading(false);
     }
   }
 
-  const inputClass =
-    'w-full rounded-xl border border-gray-700/80 bg-gray-800/70 py-2.5 pl-10 pr-10 text-sm text-gray-100 placeholder-gray-500 outline-none transition focus:border-[#7C3AED] focus:ring-2 focus:ring-[#7C3AED]/40';
+  async function handleSignup(e) {
+    e.preventDefault();
+    setAuthError('');
+    setLoading(true);
+
+    const name = values.fullName.trim().replace(/\s+/g, ' ');
+    const email = values.email.trim();
+    const errors = {};
+
+    if (!name) {
+      errors.fullName = 'Full name is required.';
+    } else if (!NAME_RE.test(name)) {
+      errors.fullName = 'Name can only contain letters, spaces, and hyphens.';
+    }
+
+    if (!email) {
+      errors.email = 'Email is required.';
+    } else if (!EMAIL_RE.test(email)) {
+      errors.email = 'Please enter a valid email address.';
+    } else if (
+      readUsers().some((u) => u.email.toLowerCase() === email.toLowerCase())
+    ) {
+      errors.email = 'An account with this email already exists. Please sign in instead.';
+    }
+
+    if (!values.password) {
+      errors.password = 'Password is required.';
+    } else if (values.password.length < 5) {
+      errors.password = 'Password must be at least 5 characters long.';
+    } else if (!PASSWORD_RE.test(values.password)) {
+      errors.password =
+        'Password must include an uppercase letter, a lowercase letter, a number, and a special character.';
+    }
+
+    if (!values.confirmPassword) {
+      errors.confirmPassword = 'Please confirm your password.';
+    } else if (values.confirmPassword !== values.password) {
+      errors.confirmPassword = 'Passwords do not match.';
+    }
+
+    setFieldErrors(errors);
+    if (Object.keys(errors).length > 0) {
+      setLoading(false);
+      return;
+    }
+
+    try {
+      await wait(800);
+
+      const newUser = {
+        id: Date.now(),
+        name,
+        email,
+        password: values.password,
+      };
+
+      const users = readUsers();
+      users.push(newUser);
+      localStorage.setItem(USERS_KEY, JSON.stringify(users));
+      localStorage.setItem(
+        SESSION_KEY,
+        JSON.stringify({ id: newUser.id, name: newUser.name, email: newUser.email })
+      );
+
+      router.push('/onboarding?isNewUser=true');
+    } catch {
+      setAuthError('Something went wrong. Please try again.');
+      setLoading(false);
+    }
+  }
+
+  function handleSubmit(e) {
+    if (isSignIn) {
+      return handleSignIn(e);
+    }
+    return handleSignup(e);
+  }
 
   return (
     <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[#1F2937] px-4 py-12">
@@ -119,9 +279,9 @@ export default function AuthGateway({ initialCreate = false }) {
       </div>
 
       <div className="relative w-full max-w-5xl grid-cols-1 gap-10 lg:grid lg:grid-cols-2 lg:items-center">
-        {/* Left: Brand panel (hidden on small screens) */}
-        <div className="hidden lg:block">
-          <BrandMark scoped />
+        {/* Left: larger brand lockup (desktop only) */}
+        <div className="hidden lg:flex lg:justify-center lg:px-4">
+          <BrandMark scoped size="lg" />
         </div>
 
         {/* Right: Auth card */}
@@ -148,7 +308,7 @@ export default function AuthGateway({ initialCreate = false }) {
               className="absolute inset-y-1 left-1 rounded-lg bg-[#7C3AED] shadow-lg shadow-[#7C3AED]/40"
               animate={{
                 x: tab === TABS.SIGN_IN ? '0%' : '100%',
-                width: tab === TABS.SIGN_IN ? 'calc(50% - 4px)' : 'calc(50% - 4px)',
+                width: 'calc(50% - 4px)',
               }}
               transition={{ type: 'spring', stiffness: 320, damping: 30 }}
             />
@@ -159,10 +319,7 @@ export default function AuthGateway({ initialCreate = false }) {
                 <button
                   key={value}
                   type="button"
-                  onClick={() => {
-                    setTab(value);
-                    setError('');
-                  }}
+                  onClick={() => switchTab(value)}
                   className={`relative z-10 rounded-lg px-4 py-2.5 text-sm font-semibold transition-colors ${
                     active ? 'text-white' : 'text-gray-400 hover:text-gray-200'
                   }`}
@@ -182,67 +339,58 @@ export default function AuthGateway({ initialCreate = false }) {
             animate="visible"
           >
             <form onSubmit={handleSubmit} className="space-y-4" noValidate>
+              {authError && (
+                <motion.p
+                  initial={{ opacity: 0, y: -2 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  role="alert"
+                  className="rounded-lg bg-[#EF4444]/10 px-3 py-2 text-sm text-[#EF4444]"
+                >
+                  {authError}
+                </motion.p>
+              )}
+
               {!isSignIn && (
+                <div>
+                  <div className="relative">
+                    <User
+                      aria-hidden="true"
+                      className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500"
+                    />
+                    <input
+                      type="text"
+                      name="fullName"
+                      placeholder="Full name"
+                      autoComplete="name"
+                      value={values.fullName}
+                      onChange={(e) => setValue('fullName', e.target.value)}
+                      className={inputClass(!!fieldErrors.fullName)}
+                    />
+                  </div>
+                  <FieldError message={fieldErrors.fullName} />
+                </div>
+              )}
+
+              <div>
                 <div className="relative">
-                  <User
+                  <Mail
                     aria-hidden="true"
                     className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500"
                   />
                   <input
-                    type="text"
-                    name="fullName"
-                    placeholder="Full name"
-                    autoComplete="name"
-                    className={inputClass}
-                    required
+                    type="email"
+                    name="email"
+                    placeholder="Email"
+                    autoComplete="email"
+                    value={values.email}
+                    onChange={(e) => setValue('email', e.target.value)}
+                    className={inputClass(!!fieldErrors.email)}
                   />
                 </div>
-              )}
-
-              <div className="relative">
-                <Mail
-                  aria-hidden="true"
-                  className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500"
-                />
-                <input
-                  type="email"
-                  name="email"
-                  placeholder="Email"
-                  autoComplete="email"
-                  className={inputClass}
-                  required
-                />
+                <FieldError message={fieldErrors.email} />
               </div>
 
-              <div className="relative">
-                <Lock
-                  aria-hidden="true"
-                  className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500"
-                />
-                <input
-                  type={showPassword ? 'text' : 'password'}
-                  name="password"
-                  placeholder="Password"
-                  autoComplete={isSignIn ? 'current-password' : 'new-password'}
-                  minLength={8}
-                  className={inputClass}
-                  required
-                />
-                <button
-                  type="button"
-                  aria-label={showPassword ? 'Hide password' : 'Show password'}
-                  onClick={() => setShowPassword((prev) => !prev)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 transition hover:text-gray-200"
-                >
-                  {showPassword ? (
-                    <EyeOff className="h-4 w-4" />
-                  ) : (
-                    <Eye className="h-4 w-4" />
-                  )}
-                </button>
-              </div>
-
-              {!isSignIn && (
+              <div>
                 <div className="relative">
                   <Lock
                     aria-hidden="true"
@@ -250,13 +398,49 @@ export default function AuthGateway({ initialCreate = false }) {
                   />
                   <input
                     type={showPassword ? 'text' : 'password'}
-                    name="confirmPassword"
-                    placeholder="Confirm password"
-                    autoComplete="new-password"
-                    minLength={8}
-                    className={inputClass}
-                    required
+                    name="password"
+                    placeholder="Password"
+                    autoComplete={isSignIn ? 'current-password' : 'new-password'}
+                    minLength={5}
+                    value={values.password}
+                    onChange={(e) => setValue('password', e.target.value)}
+                    className={inputClass(!!fieldErrors.password)}
                   />
+                  <button
+                    type="button"
+                    aria-label={showPassword ? 'Hide password' : 'Show password'}
+                    onClick={() => setShowPassword((prev) => !prev)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 transition hover:text-gray-200"
+                  >
+                    {showPassword ? (
+                      <EyeOff className="h-4 w-4" />
+                    ) : (
+                      <Eye className="h-4 w-4" />
+                    )}
+                  </button>
+                </div>
+                <FieldError message={fieldErrors.password} />
+              </div>
+
+              {!isSignIn && (
+                <div>
+                  <div className="relative">
+                    <Lock
+                      aria-hidden="true"
+                      className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500"
+                    />
+                    <input
+                      type={showPassword ? 'text' : 'password'}
+                      name="confirmPassword"
+                      placeholder="Confirm password"
+                      autoComplete="new-password"
+                      minLength={5}
+                      value={values.confirmPassword}
+                      onChange={(e) => setValue('confirmPassword', e.target.value)}
+                      className={inputClass(!!fieldErrors.confirmPassword)}
+                    />
+                  </div>
+                  <FieldError message={fieldErrors.confirmPassword} />
                 </div>
               )}
 
@@ -272,17 +456,12 @@ export default function AuthGateway({ initialCreate = false }) {
                   </label>
                   <button
                     type="button"
+                    onClick={() => router.push('/forgot-password')}
                     className="text-[#A78BFA] transition hover:text-[#C4B5FD]"
                   >
                     Forgot password?
                   </button>
                 </div>
-              )}
-
-              {error && (
-                <p className="rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-400">
-                  {error}
-                </p>
               )}
 
               {/* Primary CTA */}
@@ -315,25 +494,15 @@ export default function AuthGateway({ initialCreate = false }) {
               <span className="h-px flex-1 bg-gray-700" />
             </div>
 
-            {/* Social logins */}
-            <div className="grid grid-cols-2 gap-3">
-              <motion.button
-                type="button"
-                whileTap={{ scale: 0.97 }}
-                className="flex items-center justify-center gap-2 rounded-xl border border-gray-700 bg-gray-800/60 px-4 py-2.5 text-sm font-medium text-gray-200 transition hover:border-gray-500 hover:bg-gray-700/60"
-              >
-                <GoogleIcon className="h-4 w-4" />
-                Google
-              </motion.button>
-              <motion.button
-                type="button"
-                whileTap={{ scale: 0.97 }}
-                className="flex items-center justify-center gap-2 rounded-xl border border-gray-700 bg-gray-800/60 px-4 py-2.5 text-sm font-medium text-gray-200 transition hover:border-gray-500 hover:bg-gray-700/60"
-              >
-                <GithubIcon className="h-4 w-4" />
-                GitHub
-              </motion.button>
-            </div>
+            {/* Social login */}
+            <motion.button
+              type="button"
+              whileTap={{ scale: 0.97 }}
+              className="flex w-full items-center justify-center gap-2 rounded-xl border border-gray-700 bg-gray-800/60 px-4 py-2.5 text-sm font-medium text-gray-200 transition hover:border-gray-500 hover:bg-gray-700/60"
+            >
+              <GoogleIcon className="h-4 w-4" />
+              Continue with Google
+            </motion.button>
           </motion.div>
 
           <p className="mt-6 text-center text-xs text-gray-500">

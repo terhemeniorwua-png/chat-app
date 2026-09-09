@@ -2,25 +2,61 @@
 
 import { Send } from 'lucide-react';
 
+const SIZE_STYLES = {
+  sm: {
+    container: 'gap-2',
+    moon: 'h-16 w-16',
+    plane: 'h-3 w-3',
+    planeOffset: '-left-2 -top-1.5',
+    aura: '-inset-5',
+    title: 'text-3xl',
+    subtitle: 'text-xs',
+  },
+  md: {
+    container: 'gap-3',
+    moon: 'h-20 w-20',
+    plane: 'h-4 w-4',
+    planeOffset: '-left-3 -top-2',
+    aura: '-inset-6',
+    title: 'text-4xl',
+    subtitle: 'text-sm',
+  },
+  lg: {
+    container: 'gap-4',
+    moon: 'h-32 w-32',
+    plane: 'h-6 w-6',
+    planeOffset: '-left-4 -top-3',
+    aura: '-inset-8',
+    title: 'text-5xl',
+    subtitle: 'text-base',
+  },
+};
+
 /**
  * Reusable Luna brand lockup: a warm-orange crescent moon that carries an
  * overlapping purple speech bubble whose paper plane ("Send") embodies "a new
  * light on conversation."
  *
- * Used by the splash screen and the auth gateway so the identity stays consistent.
+ * @param {object} props
+ * @param {boolean} [props.scoped=false] - omit the outer glow aura (used inside cards).
+ * @param {('sm'|'md'|'lg')} [props.size='md'] - visual scale of the lockup.
  */
-export default function BrandMark({ scoped = false }) {
+export default function BrandMark({ scoped = false, size = 'md' }) {
+  const styles = SIZE_STYLES[size] || SIZE_STYLES.md;
+
   return (
-    <div className="flex flex-col items-center gap-3">
+    <div className={`flex flex-col items-center ${styles.container}`}>
       <div className="relative flex items-center justify-center">
         {scoped ? null : (
           <div
             aria-hidden="true"
-            className="absolute -inset-6 rounded-full bg-[#F59E0B]/50 blur-xl"
+            className={`absolute ${styles.aura} rounded-full bg-[#F59E0B]/50 blur-xl`}
           />
         )}
 
-        <div className="relative flex h-20 w-20 items-center justify-center">
+        <div
+          className={`relative flex ${styles.moon} items-center justify-center`}
+        >
           <svg
             viewBox="0 0 48 48"
             aria-hidden="true"
@@ -52,17 +88,24 @@ export default function BrandMark({ scoped = false }) {
             />
           </svg>
 
-          <span className="relative -left-3 -top-2">
-            <Send className="h-4 w-4 text-white" strokeWidth={2.5} />
+          <span className={`relative ${styles.planeOffset}`}>
+            <Send
+              className={`${styles.plane} text-white`}
+              strokeWidth={2.5}
+            />
           </span>
         </div>
       </div>
 
       <div className="text-center">
-        <h1 className="text-4xl font-bold lowercase tracking-tight text-white">
+        <h1
+          className={`${styles.title} font-bold lowercase tracking-tight text-white`}
+        >
           luna
         </h1>
-        <p className="mt-1 text-sm font-light tracking-wide text-gray-400">
+        <p
+          className={`mt-1 ${styles.subtitle} font-light tracking-wide text-gray-400`}
+        >
           a new light on conversation
         </p>
       </div>
