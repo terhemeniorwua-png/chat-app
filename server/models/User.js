@@ -36,6 +36,14 @@ const userSchema = new Schema(
       required: false,
       default: '',
     },
+    resetCodeHash: {
+      type: String,
+      required: false,
+    },
+    resetCodeExpiresAt: {
+      type: Date,
+      required: false,
+    },
     createdAt: {
       type: Date,
       default: Date.now,

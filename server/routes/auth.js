@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import crypto from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { OAuth2Client } from 'google-auth-library';
@@ -13,6 +14,11 @@ const PASSWORD_RE =
   /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&-_])[A-Za-z\d@$!%*?&-_]{5,}$/;
 
 const BCRYPT_ROUNDS = 10;
+
+// Password-reset codes live 10 minutes; the short-lived "reset token" issued
+// after verification is capped at the same window so it can't outlive the code.
+const RESET_CODE_TTL_MS = 10 * 60 * 1000;
+const RESET_TOKEN_EXPIRES = '10m';
 
 function getGoogleClient() {
   return new OAuth2Client(process.env.GOOGLE_CLIENT_ID || undefined);
@@ -41,16 +47,27 @@ function validateSignupFields({ name, email, password }) {
     fieldErrors.email = 'Please enter a valid email address.';
   }
 
-  if (!password) {
-    fieldErrors.password = 'Password is required.';
-  } else if (password.length < 5) {
-    fieldErrors.password = 'Password must be at least 5 characters long.';
-  } else if (!PASSWORD_RE.test(password)) {
-    fieldErrors.password =
-      'Password must include an uppercase letter, a lowercase letter, a number, and a special character.';
+  const passwordError = validatePasswordField(password);
+  if (passwordError) {
+    fieldErrors.password = passwordError;
   }
 
   return fieldErrors;
+}
+
+/** Shared password rule used by signup and password reset. */
+function validatePasswordField(password) {
+  if (!password) return 'Password is required.';
+  if (password.length < 5) return 'Password must be at least 5 characters long.';
+  if (!PASSWORD_RE.test(password)) {
+    return 'Password must include an uppercase letter, a lowercase letter, a number, and a special character.';
+  }
+  return '';
+}
+
+/** Cryptographically random 5-digit code (10000-99999). */
+function generateResetCode() {
+  return crypto.randomInt(10000, 100000);
 }
 
 // POST /api/auth/signup
@@ -204,7 +221,10 @@ router.post('/google', async (req, res, next) => {
   }
 });
 
-// POST /api/auth/forgot-password (simulated reset link, no real email transport)
+// POST /api/auth/forgot-password
+// Mints a 5-digit reset code (hashed in the DB, valid 10 minutes) and "sends"
+// it to the user. There is no mail provider wired up yet, so the code is
+// logged server-side — swap the console.log for a real email once one exists.
 router.post('/forgot-password', async (req, res, next) => {
   try {
     const { email } = req.body || {};
@@ -221,7 +241,120 @@ router.post('/forgot-password', async (req, res, next) => {
       return res.status(404).json({ message: 'No account found with that email.' });
     }
 
-    return res.json({ message: 'Password reset link sent.' });
+    const code = generateResetCode();
+    user.resetCodeHash = await bcrypt.hash(String(code), BCRYPT_ROUNDS);
+    user.resetCodeExpiresAt = new Date(Date.now() + RESET_CODE_TTL_MS);
+    await user.save();
+
+    console.log(
+      `[luna] Your password reset code for ${user.email} is ${code}. It expires in ${RESET_CODE_TTL_MS / 60000} minutes.`
+    );
+
+    return res.json({ message: 'A password reset code was sent to your email.' });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/auth/verify-code
+// Checks the emailed code against the stored hash and expiry. On success the
+// code is burned (single use) and a short-lived JWT is returned that
+// authorizes the next step: POST /api/auth/reset-password.
+router.post('/verify-code', async (req, res, next) => {
+  try {
+    const { email, code } = req.body || {};
+
+    const fieldErrors = {};
+    const emailValue = (email || '').trim();
+    if (!emailValue || !EMAIL_RE.test(emailValue)) {
+      fieldErrors.email = 'Please enter a valid email address.';
+    }
+    const codeValue = String(code || '').trim();
+    if (!/^\d{5}$/.test(codeValue)) {
+      fieldErrors.code = 'Please enter the 5-digit code.';
+    }
+    if (Object.keys(fieldErrors).length > 0) {
+      return res.status(400).json({ message: 'Please fix the fields below.', fieldErrors });
+    }
+
+    const user = await User.findOne({ email: emailValue.toLowerCase() });
+    if (!user || !user.resetCodeHash || !user.resetCodeExpiresAt) {
+      return res
+        .status(400)
+        .json({ message: 'No password reset was requested for this email.' });
+    }
+
+    if (user.resetCodeExpiresAt.getTime() < Date.now()) {
+      return res.status(400).json({
+        message: 'This code has expired. Please request a new one.',
+      });
+    }
+
+    const matches = await bcrypt.compare(codeValue, user.resetCodeHash);
+    if (!matches) {
+      return res.status(400).json({
+        message: 'The code you entered is incorrect. Please try again.',
+      });
+    }
+
+    // Single-use code: consume it now that it has done its job.
+    user.resetCodeHash = undefined;
+    user.resetCodeExpiresAt = undefined;
+    await user.save();
+
+    const resetToken = jwt.sign(
+      { purpose: 'reset-password', email: user.email },
+      process.env.JWT_SECRET,
+      { expiresIn: RESET_TOKEN_EXPIRES }
+    );
+
+    return res.json({ message: 'Code verified.', resetToken });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/auth/reset-password
+// Accepts the verification JWT from /verify-code plus a new password that
+// passes the exact same rules as signup. Stores a fresh bcrypt hash and clears
+// any lingering reset fields.
+router.post('/reset-password', async (req, res, next) => {
+  try {
+    const { resetToken, password } = req.body || {};
+
+    let payload;
+    try {
+      payload = jwt.verify(resetToken, process.env.JWT_SECRET);
+    } catch {
+      return res.status(400).json({
+        message: 'This reset link has expired. Please start over.',
+      });
+    }
+
+    if (payload?.purpose !== 'reset-password' || !payload.email) {
+      return res.status(400).json({ message: 'Invalid reset link. Please start over.' });
+    }
+
+    const passwordError = validatePasswordField(password);
+    if (passwordError) {
+      return res.status(400).json({
+        message: 'Please fix the fields below.',
+        fieldErrors: { password: passwordError },
+      });
+    }
+
+    const user = await User.findOne({ email: payload.email });
+    if (!user) {
+      return res.status(404).json({ message: 'No account found for this reset request.' });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, BCRYPT_ROUNDS);
+    user.password = hashedPassword;
+    user.resetCodeHash = undefined;
+    user.resetCodeExpiresAt = undefined;
+    await user.save();
+
+    return res.json({ message: 'Your password has been reset. You can now sign in.' });
   } catch (err) {
     next(err);
   }

@@ -1,40 +1,27 @@
 'use client';
 
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { Suspense, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { motion } from 'framer-motion';
-import { ArrowLeft, CheckCircle2, Loader2, Mail } from 'lucide-react';
+import { ArrowLeft, Loader2, Mail } from 'lucide-react';
 import BrandMark from '@/components/BrandMark';
+import { FieldError, inputClass } from '@/components/fields';
+import { validateEmail } from '@/lib/validation';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-const STATUS = {
-  IDLE: 'idle',
-  LOADING: 'loading',
-  SUCCESS: 'success',
-};
-
-function inputClass(hasError) {
-  return [
-    'w-full rounded-xl border bg-gray-800/70 py-2.5 pl-10 pr-10 text-sm text-gray-100 placeholder-gray-500 outline-none transition focus:ring-2',
-    hasError
-      ? 'border-[#EF4444]/70 focus:border-[#EF4444] focus:ring-[#EF4444]/30'
-      : 'border-gray-700/80 focus:border-[#7C3AED] focus:ring-[#7C3AED]/40',
-  ].join(' ');
-}
 
 /**
- * Password recovery page. Asks the Luna API to send a reset link for the
- * supplied email and shows a simulated "reset link sent" confirmation in the
- * Luna design system.
+ * Step 1 of the password-recovery flow. Asks the Luna API for a 5-digit reset
+ * code and, on success, forwards to the code-entry screen
+ * (/forgot-password/verify?email=...).
  */
-export default function ForgotPasswordPage() {
+function ForgotPasswordRequest() {
   const router = useRouter();
-  const [email, setEmail] = useState('');
+  const searchParams = useSearchParams();
+  const [email, setEmail] = useState(searchParams.get('email') || '');
   const [fieldError, setFieldError] = useState('');
   const [authError, setAuthError] = useState('');
-  const [status, setStatus] = useState(STATUS.IDLE);
+  const [loading, setLoading] = useState(false);
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -42,16 +29,13 @@ export default function ForgotPasswordPage() {
     setAuthError('');
 
     const value = email.trim();
-    if (!value) {
-      setFieldError('Email is required.');
-      return;
-    }
-    if (!EMAIL_RE.test(value)) {
-      setFieldError('Please enter a valid email address.');
+    const emailError = validateEmail(value);
+    if (emailError) {
+      setFieldError(emailError);
       return;
     }
 
-    setStatus(STATUS.LOADING);
+    setLoading(true);
 
     try {
       const res = await fetch(`${API_URL}/api/auth/forgot-password`, {
@@ -64,14 +48,14 @@ export default function ForgotPasswordPage() {
       if (!res.ok) {
         setFieldError(data.fieldErrors?.email || '');
         setAuthError(data.message || 'Something went wrong. Please try again.');
-        setStatus(STATUS.IDLE);
+        setLoading(false);
         return;
       }
 
-      setStatus(STATUS.SUCCESS);
+      router.push(`/forgot-password/verify?email=${encodeURIComponent(value)}`);
     } catch {
       setAuthError('Could not reach the Luna server. Please make sure it is running.');
-      setStatus(STATUS.IDLE);
+      setLoading(false);
     }
   }
 
@@ -98,134 +82,95 @@ export default function ForgotPasswordPage() {
           transition={{ duration: 0.5, ease: 'easeOut' }}
           className="w-full rounded-3xl border border-white/10 bg-white/5 p-6 shadow-2xl backdrop-blur-xl sm:p-8"
         >
-          {status === STATUS.SUCCESS ? (
-            <motion.div
-              initial={{ opacity: 0, scale: 0.96 }}
-              animate={{ opacity: 1, scale: 1 }}
-              className="flex flex-col items-center py-4 text-center"
-            >
-              <CheckCircle2
-                className="h-14 w-14 text-[#10B981]"
-                strokeWidth={1.5}
-              />
-              <h2 className="mt-4 text-2xl font-bold text-white">
-                Check your inbox
-              </h2>
-              <p className="mt-2 text-sm leading-relaxed text-gray-400">
-                We found the account for
-                <span className="font-medium text-gray-200"> {email.trim()} </span>
-                and sent a password reset link. It&apos;s only valid for the next
-                30 minutes.
+          <form onSubmit={handleSubmit} className="space-y-4" noValidate>
+            <header>
+              <h1 className="text-2xl font-bold tracking-tight text-white">
+                Forgot password?
+              </h1>
+              <p className="mt-1.5 text-sm text-gray-400">
+                No worries — enter the email linked to your account and we&apos;ll
+                send you a 5-digit code to reset it.
               </p>
+            </header>
 
-              <motion.button
-                type="button"
-                whileTap={{ scale: 0.97 }}
-                onClick={() => setStatus(STATUS.IDLE)}
-                className="mt-6 w-full rounded-xl bg-[#7C3AED] px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-[#7C3AED]/40 transition hover:bg-[#6D28D9]"
+            {authError && (
+              <motion.p
+                initial={{ opacity: 0, y: -2 }}
+                animate={{ opacity: 1, y: 0 }}
+                role="alert"
+                className="rounded-lg bg-[#EF4444]/10 px-3 py-2 text-sm text-[#EF4444]"
               >
-                Resend link
-              </motion.button>
+                {authError}
+              </motion.p>
+            )}
+
+            <div>
+              <div className="relative">
+                <Mail
+                  aria-hidden="true"
+                  className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500"
+                />
+                <input
+                  type="email"
+                  name="email"
+                  placeholder="Email"
+                  autoComplete="email"
+                  value={email}
+                  onChange={(e) => {
+                    setEmail(e.target.value);
+                    if (fieldError) setFieldError('');
+                    if (authError) setAuthError('');
+                  }}
+                  className={inputClass(!!fieldError)}
+                />
+              </div>
+              <FieldError message={fieldError} />
+            </div>
+
+            <motion.button
+              type="submit"
+              disabled={loading}
+              whileTap={{ scale: 0.98 }}
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#7C3AED] px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-[#7C3AED]/40 transition hover:bg-[#6D28D9] hover:shadow-xl hover:shadow-[#7C3AED]/50 disabled:cursor-not-allowed disabled:opacity-70"
+            >
+              {loading ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Sending code…
+                </>
+              ) : (
+                'Send reset code'
+              )}
+            </motion.button>
+
+            <div className="flex items-center justify-between text-sm">
               <button
                 type="button"
                 onClick={() => router.push('/auth')}
-                className="mt-4 flex items-center gap-1.5 text-sm text-gray-400 transition hover:text-gray-200"
+                className="flex items-center gap-1.5 text-gray-400 transition hover:text-gray-200"
               >
                 <ArrowLeft className="h-4 w-4" />
                 Back to sign in
               </button>
-            </motion.div>
-          ) : (
-            <form onSubmit={handleSubmit} className="space-y-4" noValidate>
-              <header>
-                <h1 className="text-2xl font-bold tracking-tight text-white">
-                  Forgot password?
-                </h1>
-                <p className="mt-1.5 text-sm text-gray-400">
-                  No worries — enter the email linked to your account and we&apos;ll
-                  send you a reset link.
-                </p>
-              </header>
-
-              {authError && (
-                <motion.p
-                  initial={{ opacity: 0, y: -2 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  role="alert"
-                  className="rounded-lg bg-[#EF4444]/10 px-3 py-2 text-sm text-[#EF4444]"
-                >
-                  {authError}
-                </motion.p>
-              )}
-
-              <div>
-                <div className="relative">
-                  <Mail
-                    aria-hidden="true"
-                    className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500"
-                  />
-                  <input
-                    type="email"
-                    name="email"
-                    placeholder="Email"
-                    autoComplete="email"
-                    value={email}
-                    onChange={(e) => {
-                      setEmail(e.target.value);
-                      if (fieldError) setFieldError('');
-                      if (authError) setAuthError('');
-                    }}
-                    className={inputClass(!!fieldError)}
-                  />
-                </div>
-                {fieldError && (
-                  <motion.p
-                    initial={{ opacity: 0, y: -2 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className="mt-1.5 pl-1 text-xs font-medium text-[#EF4444]"
-                  >
-                    {fieldError}
-                  </motion.p>
-                )}
-              </div>
-
-              <motion.button
-                type="submit"
-                disabled={status === STATUS.LOADING}
-                whileTap={{ scale: 0.98 }}
-                className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#7C3AED] px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-[#7C3AED]/40 transition hover:bg-[#6D28D9] hover:shadow-xl hover:shadow-[#7C3AED]/50 disabled:cursor-not-allowed disabled:opacity-70"
+              <button
+                type="button"
+                onClick={() => router.push('/auth?mode=create')}
+                className="text-[#A78BFA] transition hover:text-[#C4B5FD]"
               >
-                {status === STATUS.LOADING ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    Sending link…
-                  </>
-                ) : (
-                  'Send reset link'
-                )}
-              </motion.button>
-
-              <div className="flex items-center justify-between text-sm">
-                <button
-                  type="button"
-                  onClick={() => router.push('/auth')}
-                  className="flex items-center gap-1.5 text-gray-400 transition hover:text-gray-200"
-                >
-                  <ArrowLeft className="h-4 w-4" />
-                  Back to sign in
-                </button>
-                <button
-                  type="button"
-                  onClick={() => router.push('/auth?mode=create')}
-                  className="text-[#A78BFA] transition hover:text-[#C4B5FD]"
-                >
-                  Create an account
-                </button>
-              </div>
-            </form>
-          )}
+                Create an account
+              </button>
+            </div>
+          </form>
         </motion.div>
       </div>
     </main>
+  );
+}
+
+export default function ForgotPasswordPage() {
+  return (
+    <Suspense fallback={null}>
+      <ForgotPasswordRequest />
+    </Suspense>
   );
 }

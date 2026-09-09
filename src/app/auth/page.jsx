@@ -11,8 +11,12 @@ const AuthGateway = dynamic(() => import('@/components/AuthGateway'), {
 function AuthContent() {
   const searchParams = useSearchParams();
   const initialCreate = searchParams.get('mode') === 'create';
+  const notice =
+    searchParams.get('reset') === 'success'
+      ? 'Your password has been reset. Sign in with your new password.'
+      : '';
 
-  return <AuthGateway initialCreate={initialCreate} />;
+  return <AuthGateway initialCreate={initialCreate} initialNotice={notice} />;
 }
 
 export default function AuthPage() {

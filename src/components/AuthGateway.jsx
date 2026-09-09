@@ -3,17 +3,15 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
-import {
-  ArrowRight,
-  Eye,
-  EyeOff,
-  Lock,
-  Mail,
-  Loader2,
-  User,
-} from 'lucide-react';
+import { ArrowRight, Mail, Loader2, User } from 'lucide-react';
 import { GoogleLogin, GoogleOAuthProvider } from '@react-oauth/google';
 import BrandMark from '@/components/BrandMark';
+import { FieldError, inputClass, PasswordInput } from '@/components/fields';
+import {
+  validateEmail,
+  validateFullName,
+  validatePassword,
+} from '@/lib/validation';
 
 const TABS = {
   SIGN_IN: 'sign-in',
@@ -26,11 +24,6 @@ const GOOGLE_CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || '';
 // Session keys persisted on the client once authentication succeeds.
 const TOKEN_KEY = 'luna_token';
 const USER_KEY = 'luna_user';
-
-const NAME_RE = /^[a-zA-Z\s-]+$/;
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const PASSWORD_RE =
-  /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&-_])[A-Za-z\d@$!%*?&-_]{5,}$/;
 
 const tabVariants = {
   hidden: (tab) => ({
@@ -96,46 +89,25 @@ function GoogleIcon({ className = '' }) {
   );
 }
 
-function FieldError({ message }) {
-  if (!message) return null;
-  return (
-    <motion.p
-      initial={{ opacity: 0, y: -2 }}
-      animate={{ opacity: 1, y: 0 }}
-      className="mt-1.5 pl-1 text-xs font-medium text-[#EF4444]"
-    >
-      {message}
-    </motion.p>
-  );
-}
-
-function inputClass(hasError) {
-  return [
-    'w-full rounded-xl border bg-gray-800/70 py-2.5 pl-10 pr-10 text-sm text-gray-100 placeholder-gray-500 outline-none transition focus:ring-2 sm:pr-10',
-    hasError
-      ? 'border-[#EF4444]/70 focus:border-[#EF4444] focus:ring-[#EF4444]/30'
-      : 'border-gray-700/80 focus:border-[#7C3AED] focus:ring-[#7C3AED]/40',
-  ].join(' ');
-}
-
 /**
  * Full panel for /auth and the post-splash screen. Sends credentials to the
  * Luna API (Express + MongoDB):
  *   - POST /api/auth/signup           -> new users, route to /onboarding
  *   - POST /api/auth/login            -> returning users, route to /dashboard
- *   - POST /api/auth/google           -> Google OAuth (credential + decoded profile)
+ *   - POST /api/auth/google           -> Google OAuth (verified credential)
  *
  * On success the returned JWT + user object are persisted in
  * `luna_token` / `luna_user`. Backend field errors render under the inputs.
  *
  * @param {object} props
  * @param {boolean} [props.initialCreate=false] - start with the Create Account tab.
+ * @param {string} [props.initialNotice=''] - optional success banner (e.g. after a password reset).
  */
-export default function AuthGateway({ initialCreate = false }) {
+export default function AuthGateway({ initialCreate = false, initialNotice = '' }) {
   const [tab, setTab] = useState(initialCreate ? TABS.CREATE_ACCOUNT : TABS.SIGN_IN);
   const [loading, setLoading] = useState(false);
   const [authError, setAuthError] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
+  const [notice, setNotice] = useState(initialNotice || '');
   const [values, setValues] = useState({
     fullName: '',
     email: '',
@@ -169,14 +141,10 @@ export default function AuthGateway({ initialCreate = false }) {
     const email = values.email.trim();
     const errors = {};
 
-    if (!email) {
-      errors.email = 'Email is required.';
-    } else if (!EMAIL_RE.test(email)) {
-      errors.email = 'Please enter a valid email address.';
-    }
-    if (!values.password) {
-      errors.password = 'Password is required.';
-    }
+    const emailError = validateEmail(email);
+    if (emailError) errors.email = emailError;
+    const passwordError = validatePassword(values.password);
+    if (passwordError) errors.password = passwordError;
 
     setFieldErrors(errors);
     if (Object.keys(errors).length > 0) {
@@ -204,26 +172,14 @@ export default function AuthGateway({ initialCreate = false }) {
     const email = values.email.trim();
     const errors = {};
 
-    if (!name) {
-      errors.fullName = 'Full name is required.';
-    } else if (!NAME_RE.test(name)) {
-      errors.fullName = 'Name can only contain letters, spaces, and hyphens.';
-    }
+    const nameError = validateFullName(name);
+    if (nameError) errors.fullName = nameError;
 
-    if (!email) {
-      errors.email = 'Email is required.';
-    } else if (!EMAIL_RE.test(email)) {
-      errors.email = 'Please enter a valid email address.';
-    }
+    const emailError = validateEmail(email);
+    if (emailError) errors.email = emailError;
 
-    if (!values.password) {
-      errors.password = 'Password is required.';
-    } else if (values.password.length < 5) {
-      errors.password = 'Password must be at least 5 characters long.';
-    } else if (!PASSWORD_RE.test(values.password)) {
-      errors.password =
-        'Password must include an uppercase letter, a lowercase letter, a number, and a special character.';
-    }
+    const passwordError = validatePassword(values.password);
+    if (passwordError) errors.password = passwordError;
 
     if (!values.confirmPassword) {
       errors.confirmPassword = 'Please confirm your password.';
@@ -347,6 +303,17 @@ export default function AuthGateway({ initialCreate = false }) {
             animate="visible"
           >
             <form onSubmit={handleSubmit} className="space-y-4" noValidate>
+              {notice && (
+                <motion.p
+                  initial={{ opacity: 0, y: -2 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  role="status"
+                  className="rounded-lg bg-[#10B981]/10 px-3 py-2 text-sm text-[#10B981]"
+                >
+                  {notice}
+                </motion.p>
+              )}
+
               {authError && (
                 <motion.p
                   initial={{ opacity: 0, y: -2 }}
@@ -398,58 +365,24 @@ export default function AuthGateway({ initialCreate = false }) {
                 <FieldError message={fieldErrors.email} />
               </div>
 
-              <div>
-                <div className="relative">
-                  <Lock
-                    aria-hidden="true"
-                    className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500"
-                  />
-                  <input
-                    type={showPassword ? 'text' : 'password'}
-                    name="password"
-                    placeholder="Password"
-                    autoComplete={isSignIn ? 'current-password' : 'new-password'}
-                    minLength={5}
-                    value={values.password}
-                    onChange={(e) => setValue('password', e.target.value)}
-                    className={inputClass(!!fieldErrors.password)}
-                  />
-                  <button
-                    type="button"
-                    aria-label={showPassword ? 'Hide password' : 'Show password'}
-                    onClick={() => setShowPassword((prev) => !prev)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 transition hover:text-gray-200"
-                  >
-                    {showPassword ? (
-                      <EyeOff className="h-4 w-4" />
-                    ) : (
-                      <Eye className="h-4 w-4" />
-                    )}
-                  </button>
-                </div>
-                <FieldError message={fieldErrors.password} />
-              </div>
+              <PasswordInput
+                name="password"
+                placeholder="Password"
+                autoComplete={isSignIn ? 'current-password' : 'new-password'}
+                value={values.password}
+                onChange={(v) => setValue('password', v)}
+                error={fieldErrors.password}
+              />
 
               {!isSignIn && (
-                <div>
-                  <div className="relative">
-                    <Lock
-                      aria-hidden="true"
-                      className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500"
-                    />
-                    <input
-                      type={showPassword ? 'text' : 'password'}
-                      name="confirmPassword"
-                      placeholder="Confirm password"
-                      autoComplete="new-password"
-                      minLength={5}
-                      value={values.confirmPassword}
-                      onChange={(e) => setValue('confirmPassword', e.target.value)}
-                      className={inputClass(!!fieldErrors.confirmPassword)}
-                    />
-                  </div>
-                  <FieldError message={fieldErrors.confirmPassword} />
-                </div>
+                <PasswordInput
+                  name="confirmPassword"
+                  placeholder="Confirm password"
+                  autoComplete="new-password"
+                  value={values.confirmPassword}
+                  onChange={(v) => setValue('confirmPassword', v)}
+                  error={fieldErrors.confirmPassword}
+                />
               )}
 
               {isSignIn && (
