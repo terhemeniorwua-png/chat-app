@@ -6,22 +6,8 @@ import { motion } from 'framer-motion';
 import { ArrowLeft, CheckCircle2, Loader2, Mail } from 'lucide-react';
 import BrandMark from '@/components/BrandMark';
 
-const USERS_KEY = 'luna_users';
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-function wait(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function readUsers() {
-  try {
-    const raw = localStorage.getItem(USERS_KEY);
-    const parsed = raw ? JSON.parse(raw) : [];
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
 
 const STATUS = {
   IDLE: 'idle',
@@ -39,9 +25,9 @@ function inputClass(hasError) {
 }
 
 /**
- * Password recovery page. Validates the email against localStorage
- * (`luna_users`) and, when a matching account exists, shows a simulated
- * "reset link sent" confirmation in the Luna design system.
+ * Password recovery page. Asks the Luna API to send a reset link for the
+ * supplied email and shows a simulated "reset link sent" confirmation in the
+ * Luna design system.
  */
 export default function ForgotPasswordPage() {
   const router = useRouter();
@@ -68,21 +54,23 @@ export default function ForgotPasswordPage() {
     setStatus(STATUS.LOADING);
 
     try {
-      await wait(900);
+      const res = await fetch(`${API_URL}/api/auth/forgot-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: value }),
+      });
+      const data = await res.json().catch(() => ({}));
 
-      const accountExists = readUsers().some(
-        (u) => u.email.toLowerCase() === value.toLowerCase()
-      );
-
-      if (!accountExists) {
-        setAuthError('No account found with that email. Please create an account first.');
+      if (!res.ok) {
+        setFieldError(data.fieldErrors?.email || '');
+        setAuthError(data.message || 'Something went wrong. Please try again.');
         setStatus(STATUS.IDLE);
         return;
       }
 
       setStatus(STATUS.SUCCESS);
     } catch {
-      setAuthError('Something went wrong. Please try again.');
+      setAuthError('Could not reach the Luna server. Please make sure it is running.');
       setStatus(STATUS.IDLE);
     }
   }

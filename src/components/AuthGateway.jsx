@@ -12,6 +12,7 @@ import {
   Loader2,
   User,
 } from 'lucide-react';
+import { GoogleLogin, GoogleOAuthProvider } from '@react-oauth/google';
 import BrandMark from '@/components/BrandMark';
 
 const TABS = {
@@ -19,8 +20,12 @@ const TABS = {
   CREATE_ACCOUNT: 'create-account',
 };
 
-const USERS_KEY = 'luna_users';
-const SESSION_KEY = 'luna_current_user';
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
+const GOOGLE_CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || '';
+
+// Session keys persisted on the client once authentication succeeds.
+const TOKEN_KEY = 'luna_token';
+const USER_KEY = 'luna_user';
 
 const NAME_RE = /^[a-zA-Z\s-]+$/;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -40,17 +45,47 @@ const tabVariants = {
   },
 };
 
-function wait(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+async function apiPost(path, payload) {
+  let res;
+  try {
+    res = await fetch(`${API_URL}${path}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+  } catch {
+    throw new Error('Could not reach the Luna server. Please make sure it is running.');
+  }
+
+  const data = await res.json().catch(() => ({}));
+
+  if (!res.ok) {
+    const error = new Error(data.message || 'Something went wrong. Please try again.');
+    error.fieldErrors = data.fieldErrors || {};
+    throw error;
+  }
+
+  return data;
 }
 
-function readUsers() {
+function persistSession(token, user) {
+  localStorage.setItem(TOKEN_KEY, token);
+  localStorage.setItem(USER_KEY, JSON.stringify(user));
+}
+
+function decodeJwtPayload(token) {
   try {
-    const raw = localStorage.getItem(USERS_KEY);
-    const parsed = raw ? JSON.parse(raw) : [];
-    return Array.isArray(parsed) ? parsed : [];
+    const base64 = token.split('.')[1]?.replace(/-/g, '+').replace(/_/g, '/');
+    if (!base64) return null;
+    const json = decodeURIComponent(
+      atob(base64)
+        .split('')
+        .map((c) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
+        .join('')
+    );
+    return JSON.parse(json);
   } catch {
-    return [];
+    return null;
   }
 }
 
@@ -100,11 +135,14 @@ function inputClass(hasError) {
 }
 
 /**
- * Full panel for /auth: brand lockup, Sign In / Create Account switcher, and
- * localStorage-backed auth. New accounts are stored under `luna_users`, the
- * active session under `luna_current_user`:
- *   - Sign In  -> /dashboard (returning users)
- *   - Signup   -> /onboarding (new users)
+ * Full panel for /auth and the post-splash screen. Sends credentials to the
+ * Luna API (Express + MongoDB):
+ *   - POST /api/auth/signup           -> new users, route to /onboarding
+ *   - POST /api/auth/login            -> returning users, route to /dashboard
+ *   - POST /api/auth/google           -> Google OAuth (credential + decoded profile)
+ *
+ * On success the returned JWT + user object are persisted in
+ * `luna_token` / `luna_user`. Backend field errors render under the inputs.
  *
  * @param {object} props
  * @param {boolean} [props.initialCreate=false] - start with the Create Account tab.
@@ -163,27 +201,12 @@ export default function AuthGateway({ initialCreate = false }) {
     }
 
     try {
-      await wait(800);
-
-      const user = readUsers().find(
-        (u) => u.email.toLowerCase() === email.toLowerCase()
-      );
-
-      if (!user || user.password !== values.password) {
-        setAuthError(
-          'Account does not exist or credentials are incorrect. Please create an account first.'
-        );
-        setLoading(false);
-        return;
-      }
-
-      localStorage.setItem(
-        SESSION_KEY,
-        JSON.stringify({ id: user.id, name: user.name, email: user.email })
-      );
+      const data = await apiPost('/api/auth/login', { email, password: values.password });
+      persistSession(data.token, data.user);
       router.push('/dashboard');
-    } catch {
-      setAuthError('Something went wrong. Please try again.');
+    } catch (err) {
+      setFieldErrors(err.fieldErrors || {});
+      setAuthError(err.message || 'Something went wrong. Please try again.');
       setLoading(false);
     }
   }
@@ -207,10 +230,6 @@ export default function AuthGateway({ initialCreate = false }) {
       errors.email = 'Email is required.';
     } else if (!EMAIL_RE.test(email)) {
       errors.email = 'Please enter a valid email address.';
-    } else if (
-      readUsers().some((u) => u.email.toLowerCase() === email.toLowerCase())
-    ) {
-      errors.email = 'An account with this email already exists. Please sign in instead.';
     }
 
     if (!values.password) {
@@ -235,26 +254,33 @@ export default function AuthGateway({ initialCreate = false }) {
     }
 
     try {
-      await wait(800);
-
-      const newUser = {
-        id: Date.now(),
+      const data = await apiPost('/api/auth/signup', {
         name,
         email,
         password: values.password,
-      };
-
-      const users = readUsers();
-      users.push(newUser);
-      localStorage.setItem(USERS_KEY, JSON.stringify(users));
-      localStorage.setItem(
-        SESSION_KEY,
-        JSON.stringify({ id: newUser.id, name: newUser.name, email: newUser.email })
-      );
-
+      });
+      persistSession(data.token, data.user);
       router.push('/onboarding?isNewUser=true');
-    } catch {
-      setAuthError('Something went wrong. Please try again.');
+    } catch (err) {
+      setFieldErrors(err.fieldErrors || {});
+      setAuthError(err.message || 'Something went wrong. Please try again.');
+      setLoading(false);
+    }
+  }
+
+  async function handleGoogleCredential(credential) {
+    setAuthError('');
+    setLoading(true);
+
+    const profile = decodeJwtPayload(credential);
+
+    try {
+      const data = await apiPost('/api/auth/google', { credential, profile });
+      persistSession(data.token, data.user);
+      router.push(data.isNewUser ? '/onboarding?isNewUser=true' : '/dashboard');
+    } catch (err) {
+      setFieldErrors(err.fieldErrors || {});
+      setAuthError(err.message || 'Google sign-in failed.');
       setLoading(false);
     }
   }
@@ -266,7 +292,7 @@ export default function AuthGateway({ initialCreate = false }) {
     return handleSignup(e);
   }
 
-  return (
+  const content = (
     <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[#1F2937] px-4 py-12">
       {/* Ambient gradient backdrop */}
       <div
@@ -494,15 +520,35 @@ export default function AuthGateway({ initialCreate = false }) {
               <span className="h-px flex-1 bg-gray-700" />
             </div>
 
-            {/* Social login */}
-            <motion.button
-              type="button"
-              whileTap={{ scale: 0.97 }}
-              className="flex w-full items-center justify-center gap-2 rounded-xl border border-gray-700 bg-gray-800/60 px-4 py-2.5 text-sm font-medium text-gray-200 transition hover:border-gray-500 hover:bg-gray-700/60"
-            >
-              <GoogleIcon className="h-4 w-4" />
-              Continue with Google
-            </motion.button>
+            {/* Google OAuth */}
+            {GOOGLE_CLIENT_ID ? (
+              <GoogleLogin
+                onSuccess={({ credential }) => {
+                  if (credential) handleGoogleCredential(credential);
+                }}
+                onError={() =>
+                  setAuthError('Google sign-in failed. Please try again.')
+                }
+                shape="pill"
+                theme="filled_black"
+                text="continue_with"
+                size="large"
+                width="100%"
+              />
+            ) : (
+              <button
+                type="button"
+                onClick={() =>
+                  setAuthError(
+                    'Google sign-in is not configured. Add NEXT_PUBLIC_GOOGLE_CLIENT_ID to .env.local.'
+                  )
+                }
+                className="flex w-full items-center justify-center gap-2 rounded-xl border border-gray-700 bg-gray-800/60 px-4 py-2.5 text-sm font-medium text-gray-200 transition hover:border-gray-500 hover:bg-gray-700/60"
+              >
+                <GoogleIcon className="h-4 w-4" />
+                Continue with Google
+              </button>
+            )}
           </motion.div>
 
           <p className="mt-6 text-center text-xs text-gray-500">
@@ -512,4 +558,10 @@ export default function AuthGateway({ initialCreate = false }) {
       </div>
     </main>
   );
+
+  if (!GOOGLE_CLIENT_ID) {
+    return content;
+  }
+
+  return <GoogleOAuthProvider clientId={GOOGLE_CLIENT_ID}>{content}</GoogleOAuthProvider>;
 }

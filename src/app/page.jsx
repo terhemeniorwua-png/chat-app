@@ -1,10 +1,13 @@
 'use client';
 
 import { useState } from 'react';
-import Link from 'next/link';
-import { AnimatePresence, motion } from 'framer-motion';
+import dynamic from 'next/dynamic';
+import { AnimatePresence } from 'framer-motion';
 import SplashScreen from '@/components/SplashScreen';
-import AuthGateway from '@/components/AuthGateway';
+
+const AuthGateway = dynamic(() => import('@/components/AuthGateway'), {
+  ssr: false,
+});
 
 /**
  * Phase 1 : Splash loader     -> <SplashScreen />
