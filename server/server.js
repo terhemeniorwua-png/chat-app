@@ -3,6 +3,7 @@ import express from 'express';
 import cors from 'cors';
 import mongoose from 'mongoose';
 import authRoutes from './routes/auth.js';
+import friendsRoutes from './routes/friends.js';
 
 const app = express();
 
@@ -63,6 +64,7 @@ app.get('/api/health', (req, res) => {
 });
 
 app.use('/api/auth', authRoutes);
+app.use('/api/friends', friendsRoutes);
 
 // 404 for unknown API routes
 app.use((req, res) => {

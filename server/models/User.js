@@ -48,6 +48,21 @@ const userSchema = new Schema(
       type: String,
       required: false,
     },
+    // Friend relationships: each entry is the _id of another User. An accepted
+    // friend request appends both users to each other's array.
+    friends: [
+      {
+        type: Schema.Types.ObjectId,
+        ref: 'User',
+      },
+    ],
+    // Users the current user chose to hide from their suggestions list.
+    ignoredUsers: [
+      {
+        type: Schema.Types.ObjectId,
+        ref: 'User',
+      },
+    ],
     createdAt: {
       type: Date,
       default: Date.now,
