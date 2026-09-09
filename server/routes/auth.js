@@ -297,13 +297,19 @@ router.post('/verify-code', async (req, res, next) => {
       });
     }
 
-    // Single-use code: consume it now that it has done its job.
+    // Single-use: burn the code now and stash a hash of the reset nonce that
+    // will be embedded in the JWT below, so the token can only be redeemed once.
+    const resetNonce = crypto.randomBytes(24).toString('hex');
     user.resetCodeHash = undefined;
     user.resetCodeExpiresAt = undefined;
+    user.resetTokenHash = crypto
+      .createHash('sha256')
+      .update(resetNonce)
+      .digest('hex');
     await user.save();
 
     const resetToken = jwt.sign(
-      { purpose: 'reset-password', email: user.email },
+      { purpose: 'reset-password', email: user.email, nonce: resetNonce },
       process.env.JWT_SECRET,
       { expiresIn: RESET_TOKEN_EXPIRES }
     );
@@ -344,14 +350,25 @@ router.post('/reset-password', async (req, res, next) => {
     }
 
     const user = await User.findOne({ email: payload.email });
-    if (!user) {
-      return res.status(404).json({ message: 'No account found for this reset request.' });
+    if (!user || !user.resetTokenHash) {
+      return res.status(400).json({ message: 'This reset link has expired. Please start over.' });
+    }
+
+    // The nonce embedded in the JWT must match the one issued at /verify-code,
+    // making the token single-use.
+    const nonceHash = crypto
+      .createHash('sha256')
+      .update(payload.nonce || '')
+      .digest('hex');
+    if (nonceHash !== user.resetTokenHash) {
+      return res.status(400).json({ message: 'This reset link has expired. Please start over.' });
     }
 
     const hashedPassword = await bcrypt.hash(password, BCRYPT_ROUNDS);
     user.password = hashedPassword;
     user.resetCodeHash = undefined;
     user.resetCodeExpiresAt = undefined;
+    user.resetTokenHash = undefined;
     await user.save();
 
     return res.json({ message: 'Your password has been reset. You can now sign in.' });

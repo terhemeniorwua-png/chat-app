@@ -44,6 +44,10 @@ const userSchema = new Schema(
       type: Date,
       required: false,
     },
+    resetTokenHash: {
+      type: String,
+      required: false,
+    },
     createdAt: {
       type: Date,
       default: Date.now,
