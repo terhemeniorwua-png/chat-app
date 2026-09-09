@@ -5,67 +5,55 @@ import { motion } from 'framer-motion';
 import { Send } from 'lucide-react';
 
 /**
- * Timing map for the splash sequence (all values in seconds).
- * Encode the phases up top so the math is easy to audit and tweak:
+ * Timing map for the splash sequence (all values in seconds). The math is
+ * deliberately kept linear and auditable:
  *
- *   1. intro  : scale/opacity entrance            0.0s - 0.6s
- *   2. glow   : two full glow cycles with a 0.2s 0.6s - 3.2s
- *               settle before the first pulse
- *   3. outro  : graceful fade-out then `onComplete` 3.2s - 3.8s
+ *   1. intro        : content scales/fades in            0.0s - 0.6s
+ *   2. pre-glow hold: beat before the first pulse      0.6s - 0.8s
+ *   3. glow         : two full pulses of the halo      0.8s - 2.2s
+ *   4. settle       : breathe before the exit fade     2.2s - 2.3s
+ *
+ * `onComplete` fires at the end of the settle; AnimatePresence in the parent
+ * then plays the 0.6s exit fade (OUTRO_DURATION), so the total time on stage
+ * is ~2.9s and there is no doubled fade-out.
  */
 const INTRO_DURATION = 0.6;
-const GLOW_CYCLE_DURATION = 1.2;
-const GLOW_PULSES = 2;
 const PRE_GLOW_HOLD = 0.2;
+const PULSE_DURATION = 0.7;
+const GLOW_PULSES = 2;
+const SETTLE = 0.1;
 const OUTRO_DURATION = 0.6;
 
+const GLOW_DURATION = PULSE_DURATION * GLOW_PULSES;
+
 const TOTAL_MS = Math.round(
-  (INTRO_DURATION +
-    PRE_GLOW_HOLD +
-    GLOW_CYCLE_DURATION * GLOW_PULSES +
-    OUTRO_DURATION) *
-    1000
+  (INTRO_DURATION + PRE_GLOW_HOLD + GLOW_DURATION + SETTLE) * 1000
 );
 
 /**
- * Builds the keyframe arrays for two full glow cycles.
- *
- * The specified `scale: [1, 1.45, 1, 1.45, 1]` and `opacity: [0.2, 0.95, ...]`
- * maps to a single-timescale `times` array that evenly distributes each
- * cycle-keyframe (including both peak values) across the whole sequence, so
- * every full cycle completes within its slot.
+ * Two full pulse cycles on a single normalized timeline: the keyframe arrays
+ * below alternate 1 -> 1.5 -> 1 -> 1.5 -> 1 (twice the `times` steps), and the
+ * `times` array spreads each cycle across GLOW_DURATION equally.
  */
-function buildGlowTiming(cycleDuration, pulses) {
-  const seconds = [0];
-  for (let p = 0; p < pulses; p++) {
-    const cycleStart = seconds[seconds.length - 1];
-    seconds.push(
-      cycleStart + cycleDuration * 0.45,
-      cycleStart + cycleDuration * 0.7,
-      cycleStart + cycleDuration * 0.95,
-      cycleStart + cycleDuration
-    );
-  }
-  return seconds;
-}
-
-const glowTimes = buildGlowTiming(GLOW_CYCLE_DURATION, GLOW_PULSES);
-
-const glowScale = Array.from({ length: 1 + glowTimes.slice(1).length }, (_, i) =>
-  i === 0 ? 1 : i % 4 === 1 ? 1.45 : i % 4 === 2 ? 1 : i % 4 === 3 ? 1.45 : 1
+const GLOW_SCALE = Array.from({ length: GLOW_PULSES * 2 + 1 }, (_, i) =>
+  i % 2 === 0 ? 1 : 1.5
 );
-
-const glowOpacity = Array.from(
-  { length: 1 + glowTimes.slice(1).length },
-  (_, i) =>
-    i === 0 || i % 4 === 0 ? 0.2 : i % 4 === 1 ? 0.95 : i % 4 === 2 ? 0.2 : 0.95
+const GLOW_OPACITY = Array.from({ length: GLOW_PULSES * 2 + 1 }, (_, i) =>
+  i % 2 === 0 ? 0.3 : 1
+);
+const GLOW_TIMES = Array.from(
+  { length: GLOW_PULSES * 2 + 1 },
+  (_, i) => i / (GLOW_PULSES * 2)
 );
 
 /**
- * The first screen a visitor sees.
+ * The first screen a visitor sees: the Luna mark (orange moon wrapping a
+ * purple speech bubble with the paper plane) over an ambient glow that pulses
+ * twice before handing off to the auth gateway.
  *
  * @param {object} props
- * @param {() => void} props.onComplete - called after the outro completes.
+ * @param {() => void} props.onComplete - called after the settle; the parent
+ *   should remove this component to trigger the exit fade.
  */
 export default function SplashScreen({ onComplete }) {
   useEffect(() => {
@@ -81,31 +69,29 @@ export default function SplashScreen({ onComplete }) {
       exit={{ opacity: 0, transition: { duration: OUTRO_DURATION, ease: 'easeInOut' } }}
     >
       {/*
-        Ghost glow ring that sits behind the orange moon. Fires two full
-        pulse cycles via the keyframes above, starting after the intro settles.
+        Halo pulse behind the mark. Starts after the intro and the pre-glow
+        hold, completes two full cycles, then holds at scale 1 / opacity 0.3
+        during the settle.
       */}
       <motion.span
         aria-hidden="true"
-        className="pointer-events-none absolute h-[11rem] w-[11rem] rounded-full bg-[#F59E0B]/50 blur-xl"
-        initial={{ scale: 1, opacity: 0.2 }}
+        className="pointer-events-none absolute h-[11rem] w-[11rem] rounded-full bg-[#F59E0B]/40 blur-xl"
+        initial={{ scale: 1, opacity: 0.3 }}
         animate={{
-          scale: glowScale,
-          opacity: glowOpacity,
+          scale: GLOW_SCALE,
+          opacity: GLOW_OPACITY,
           transition: {
             delay: INTRO_DURATION + PRE_GLOW_HOLD,
-            duration: GLOW_CYCLE_DURATION * GLOW_PULSES,
-            times: glowTimes.map(
-              (t) =>
-                (INTRO_DURATION + PRE_GLOW_HOLD + t * (1 / (glowTimes.length - 1))) /
-                3.4
-            ),
+            duration: GLOW_DURATION,
+            times: GLOW_TIMES,
             ease: 'easeInOut',
           },
         }}
       />
 
       {/*
-        Content block scales in (0.5 -> 1) and fades up over the intro window.
+        Content block scales in (0.5 -> 1) and fades up over the intro window,
+        then rides along with the glow behind it.
       */}
       <motion.div
         className="relative flex flex-col items-center"

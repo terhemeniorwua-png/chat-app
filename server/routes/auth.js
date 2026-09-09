@@ -20,7 +20,7 @@ function getGoogleClient() {
 
 function signToken(user) {
   return jwt.sign(
-    { id: user._id.toString(), email: user.email },
+    { userId: user._id },
     process.env.JWT_SECRET,
     { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
   );
@@ -125,19 +125,28 @@ router.post('/login', async (req, res, next) => {
 // POST /api/auth/google
 router.post('/google', async (req, res, next) => {
   try {
-    const { credential, profile } = req.body || {};
+    const { credential } = req.body || {};
 
-    let payload = profile;
-    if (process.env.GOOGLE_CLIENT_ID && credential) {
-      try {
-        const ticket = await getGoogleClient().verifyIdToken({
-          idToken: credential,
-          audience: process.env.GOOGLE_CLIENT_ID,
-        });
-        payload = ticket.getPayload();
-      } catch {
-        return res.status(401).json({ message: 'Google authentication failed.' });
-      }
+    if (!credential) {
+      return res.status(400).json({ message: 'Google authentication failed.' });
+    }
+
+    if (!process.env.GOOGLE_CLIENT_ID) {
+      return res.status(500).json({
+        message: 'Google sign-in is not configured. Add GOOGLE_CLIENT_ID to .env.',
+      });
+    }
+
+    let payload;
+    try {
+      const ticket = await getGoogleClient().verifyIdToken({
+        idToken: credential,
+        audience: process.env.GOOGLE_CLIENT_ID,
+      });
+      payload = ticket.getPayload();
+    } catch {
+      // Invalid signature, wrong audience, expired, etc.
+      return res.status(401).json({ message: 'Google authentication failed.' });
     }
 
     const googleId = payload?.sub;
@@ -148,16 +157,22 @@ router.post('/google', async (req, res, next) => {
 
     // Google names can contain characters outside our local-signup allowlist,
     // so fall back to the email prefix when they don't fit.
-    const rawName = (payload.name || email.split('@')[0]).trim().replace(/\s+/g, ' ');
-    const name = NAME_RE.test(rawName) ? rawName : email.split('@')[0];
+    const rawName = (payload.name || '').trim().replace(/\s+/g, ' ');
+    const name = rawName && NAME_RE.test(rawName) ? rawName : email.split('@')[0];
     const avatarUrl = payload.picture || '';
 
-    let user = await User.findOne({ $or: [{ googleId }, { email }] });
+    let user = await User.findOne({ email });
     let isNewUser = false;
 
     if (user) {
+      // Existing account: link the Google identity the first time around and
+      // refresh the profile name/avatar opportunistically.
       let changed = false;
-      if (user.name !== name && NAME_RE.test(name)) {
+      if (!user.googleId) {
+        user.googleId = googleId;
+        changed = true;
+      }
+      if (name && user.name !== name) {
         user.name = name;
         changed = true;
       }
@@ -165,14 +180,11 @@ router.post('/google', async (req, res, next) => {
         user.avatarUrl = avatarUrl;
         changed = true;
       }
-      if (!user.googleId) {
-        user.googleId = googleId;
-        changed = true;
-      }
       if (changed) {
         await user.save();
       }
     } else {
+      // Brand-new Google account.
       user = await User.create({
         name,
         email,

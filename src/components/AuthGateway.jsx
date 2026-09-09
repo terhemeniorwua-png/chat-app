@@ -73,22 +73,6 @@ function persistSession(token, user) {
   localStorage.setItem(USER_KEY, JSON.stringify(user));
 }
 
-function decodeJwtPayload(token) {
-  try {
-    const base64 = token.split('.')[1]?.replace(/-/g, '+').replace(/_/g, '/');
-    if (!base64) return null;
-    const json = decodeURIComponent(
-      atob(base64)
-        .split('')
-        .map((c) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
-        .join('')
-    );
-    return JSON.parse(json);
-  } catch {
-    return null;
-  }
-}
-
 function GoogleIcon({ className = '' }) {
   return (
     <svg viewBox="0 0 24 24" className={className} aria-hidden="true">
@@ -272,12 +256,10 @@ export default function AuthGateway({ initialCreate = false }) {
     setAuthError('');
     setLoading(true);
 
-    const profile = decodeJwtPayload(credential);
-
     try {
-      const data = await apiPost('/api/auth/google', { credential, profile });
+      const data = await apiPost('/api/auth/google', { credential });
       persistSession(data.token, data.user);
-      router.push(data.isNewUser ? '/onboarding?isNewUser=true' : '/dashboard');
+      router.push('/dashboard');
     } catch (err) {
       setFieldErrors(err.fieldErrors || {});
       setAuthError(err.message || 'Google sign-in failed.');
@@ -526,14 +508,27 @@ export default function AuthGateway({ initialCreate = false }) {
                 onSuccess={({ credential }) => {
                   if (credential) handleGoogleCredential(credential);
                 }}
-                onError={() =>
-                  setAuthError('Google sign-in failed. Please try again.')
-                }
+                onError={() => {
+                  setLoading(false);
+                  setAuthError('Google sign-in failed. Please try again.');
+                }}
                 shape="pill"
                 theme="filled_black"
                 text="continue_with"
                 size="large"
                 width="100%"
+                render={({ onClick }) => (
+                  <motion.button
+                    type="button"
+                    onClick={onClick}
+                    disabled={loading}
+                    whileTap={{ scale: 0.98 }}
+                    className="flex w-full items-center justify-center gap-2 rounded-xl border border-gray-700 bg-gray-800/60 px-4 py-2.5 text-sm font-medium text-gray-200 transition hover:border-gray-500 hover:bg-gray-700/60 disabled:cursor-not-allowed disabled:opacity-70"
+                  >
+                    <GoogleIcon className="h-4 w-4" />
+                    Continue with Google
+                  </motion.button>
+                )}
               />
             ) : (
               <button
