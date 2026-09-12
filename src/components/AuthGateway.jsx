@@ -449,7 +449,6 @@ export default function AuthGateway({ initialCreate = false, initialNotice = '' 
                 theme="filled_black"
                 text="continue_with"
                 size="large"
-                width="100%"
                 render={({ onClick }) => (
                   <motion.button
                     type="button"

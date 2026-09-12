@@ -46,8 +46,8 @@ async function request(method, path, body) {
   // An expired/invalid token ends the session and bounces to the auth screen.
   if (res.status === 401 && token) {
     clearSession();
-    if (typeof window !== 'undefined' && window.location.pathname !== '/auth') {
-      window.location.href = '/auth';
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('luna:unauthorized'));
     }
     throw new Error('Session expired. Please sign in again.');
   }

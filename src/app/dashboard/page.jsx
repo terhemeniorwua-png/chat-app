@@ -3,7 +3,7 @@
 import { Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { motion } from 'framer-motion';
-import { ArrowRight } from 'lucide-react';
+import { UserPlus, UserCheck } from 'lucide-react';
 import Link from 'next/link';
 
 /**
@@ -34,13 +34,22 @@ function DashboardStub() {
         </p>
       </motion.div>
 
-      <Link
-        href="/auth"
-        className="flex items-center gap-2 rounded-xl bg-[#7C3AED] px-4 py-3 text-sm font-semibold text-white transition hover:bg-[#6D28D9]"
-      >
-        Go to auth
-        <ArrowRight className="h-4 w-4" />
-      </Link>
+      <div className="mt-2 flex flex-wrap items-center justify-center gap-3">
+        <Link
+          href="/friends/suggestions"
+          className="flex items-center gap-2 rounded-xl bg-[#7C3AED] px-4 py-3 text-sm font-semibold text-white transition hover:bg-[#6D28D9]"
+        >
+          <UserPlus className="h-4 w-4" />
+          Friend suggestions
+        </Link>
+        <Link
+          href="/friends/requests"
+          className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-semibold text-gray-200 transition hover:bg-white/10 hover:text-white"
+        >
+          <UserCheck className="h-4 w-4" />
+          Friend requests
+        </Link>
+      </div>
     </main>
   );
 }
