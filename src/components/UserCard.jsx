@@ -24,10 +24,10 @@ export default function UserCard({ user, status = 'idle', onAdd, onIgnore, onCan
       className="flex flex-col justify-between gap-4 rounded-2xl border border-gray-200 bg-white p-5 shadow-lg dark:border-white/10 dark:bg-white/5"
     >
       <div className="flex items-center gap-3">
-        <Avatar name={user.name} src={user.avatarUrl} size="md" />
+        <Avatar name={user.displayName} src={user.avatarUrl} size="md" />
         <div className="min-w-0">
           <p className="truncate text-sm font-semibold text-gray-900 dark:text-white">
-            {user.name}
+            {user.displayName}
           </p>
           <p className="truncate text-xs text-gray-500 dark:text-gray-400">
             {user.username ? `@${user.username}` : user.email}
@@ -70,7 +70,7 @@ export default function UserCard({ user, status = 'idle', onAdd, onIgnore, onCan
             onClick={onIgnore}
             disabled={busy}
             className="flex items-center gap-1.5 rounded-xl border border-gray-200 bg-[var(--luna-surface-2)] px-3 py-2.5 text-sm font-semibold text-gray-600 transition hover:bg-gray-100 hover:text-gray-900 disabled:cursor-not-allowed dark:border-white/10 dark:bg-white/5 dark:text-gray-300 dark:hover:bg-white/10 dark:hover:text-white"
-            aria-label={`Ignore ${user.name}`}
+            aria-label={`Ignore ${user.displayName}`}
           >
             <UserMinus className="h-4 w-4" />
             Ignore

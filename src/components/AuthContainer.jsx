@@ -3,19 +3,18 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
-import { ArrowRight, Mail, Loader2, User, X, Zap } from 'lucide-react';
-import { GoogleLogin, GoogleOAuthProvider } from '@react-oauth/google';
+import { ArrowRight, Loader2, Phone, User, X, Zap } from 'lucide-react';
 import BrandMark from '@/components/BrandMark';
-import ThemeToggle from '@/components/ThemeToggle';
 import { FieldError, inputClass, PasswordInput } from '@/components/fields';
 import {
   validateEmail,
   validateFullName,
   validatePassword,
+  validatePhoneNumber,
+  validateUsername,
 } from '@/lib/validation';
 import {
   persistAuthSession,
-  clearRememberedPassword,
   rememberPassword,
 } from '@/lib/session';
 import { useSession } from '@/hooks/useSession';
@@ -27,7 +26,6 @@ const TABS = {
 };
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
-const GOOGLE_CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || '';
 
 const tabVariants = {
   hidden: (tab) => ({
@@ -65,46 +63,19 @@ async function apiPost(path, payload) {
   return data;
 }
 
-function GoogleIcon({ className = '' }) {
-  return (
-    <svg viewBox="0 0 24 24" className={className} aria-hidden="true">
-      <path
-        fill="#EA4335"
-        d="M12 5.04c1.6 0 3.03.55 4.16 1.63l3.1-3.1C17.44 1.68 14.96.6 12 .6 7.45.6 3.54 3.22 1.8 7.01l3.62 2.8A7.1 7.1 0 0 1 12 5.04Z"
-      />
-      <path
-        fill="#4285F4"
-        d="M23.4 12.27c0-.86-.08-1.7-.23-2.5H12v4.73h6.42a5.4 5.4 0 0 1-2.34 3.55l3.54 2.74c2.09-1.93 3.78-4.77 3.78-8.52Z"
-      />
-      <path
-        fill="#FBBC05"
-        d="M5.43 14.2a7.4 7.4 0 0 1 0-4.4L1.8 6.98a12.04 12.04 0 0 0 0 10.04l3.63-2.82Z"
-      />
-      <path
-        fill="#34A853"
-        d="M12 23.4c3.24 0 5.96-1.08 7.95-2.92l-3.54-2.74c-1 .67-2.29 1.07-4.41 1.07a7.1 7.1 0 0 1-6.57-4.4L1.8 17c1.74 3.78 5.65 6.4 10.2 6.4Z"
-      />
-    </svg>
-  );
-}
-
-function AppleIcon({ className = '' }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
-      <path d="M16.365 1.43c0 1.14-.42 2.2-1.24 3.03-.92.92-2.09 1.45-3.08 1.36-.06-.99.38-2.08 1.19-2.9.77-.83 2.02-1.45 3.13-1.49Zm3.72 14.12c.3.75.5 1.46.72 2.23.31.95.5 1.87.51 2.03 0 .06-.06.1-.16.07a7.6 7.6 0 0 1-2.92-1.9c-.63-.72-1.16-1.4-1.6-1.9-.76.8-1.55 1.2-2.62 1.26-.94.06-1.96-.24-2.9-.83-1.6-.99-2.88-2.6-3.73-4.63-.87-2.1-1.2-4.14-.92-6.06.28-1.93 1.19-3.52 2.75-4.63.98-.71 2.06-1.06 3.26-1.02 1.11.04 2.1.32 2.96.93.42-.18.86-.4 1.31-.52.5-.13 1.05-.18 1.63-.13.48.04.9.13 1.28.27-.2.47-.4.89-.62 1.28-.38.66-.9 1.27-1.57 1.76-1.2.87-1.8 1.96-1.84 3.32-.05 1.9 1.18 3.4 3.1 4.14.44.18.9.3 1.27.37.22.04.42.06.64.04Z" />
-    </svg>
-  );
-}
-
 /**
  * AuthContainer — the primary authentication surface. Strictly two tabs:
- * "Sign In" and "Create Account" (no OTP). Alongside the form it renders the
- * Saved Profiles list so a saved account can tap-to-login — or, when only
- * metadata was kept ("Logout Only"), route to a password re-auth prompt.
+ * "Sign In" and "Create Account". Sign-in uses phone OR username; sign-up
+ * requires a phone number, display name, username and password. Social login
+ * buttons were removed by design; password recovery goes through the SMS OTP
+ * flow (/forgot-password).
  *
- *   - POST /api/auth/signup        -> new users, route to /onboarding
- *   - POST /api/auth/login         -> returning users (email OR username)
- *   - POST /api/auth/google        -> Google OAuth (verified credential)
+ * Alongside the form it renders the Saved Profiles list so a saved account can
+ * tap-to-login — or, when only metadata was kept ("Logout Only"), route to a
+ * password re-auth prompt.
+ *
+ *   - POST /api/auth/signup  -> new users, route to /onboarding
+ *   - POST /api/auth/login   -> returning users (phone OR username)
  *
  * @param {object} props
  * @param {boolean} [props.initialCreate=false]
@@ -125,8 +96,10 @@ export default function AuthContainer({
   const [authError, setAuthError] = useState('');
   const [notice, setNotice] = useState(initialNotice || '');
   const [values, setValues] = useState({
-    fullName: '',
-    email: initialIdentifier || '',
+    displayName: '',
+    phoneNumber: '',
+    username: '',
+    identifier: initialIdentifier || '',
     password: '',
     confirmPassword: '',
   });
@@ -152,21 +125,26 @@ export default function AuthContainer({
     setLoading(false);
   }
 
+  // Sign In accepts a phone number (primary) or a username. A legacy email is
+  // tolerated for pre-phone accounts.
+  function validateIdentifier(value) {
+    const v = value.trim();
+    if (!v) return 'Phone number or username is required.';
+    if (v.includes('@')) return validateEmail(v);
+    if (/^\+?[0-9]/.test(v)) return validatePhoneNumber(v);
+    return v.length >= 3 ? '' : 'Enter at least 3 characters.';
+  }
+
   async function handleSignIn(e) {
     e.preventDefault();
     setAuthError('');
     setLoading(true);
 
-    const identifier = values.email.trim();
+    const identifier = values.identifier.trim();
     const errors = {};
 
-    let identifierError = null;
-    if (identifier.includes('@')) {
-      identifierError = validateEmail(identifier);
-    } else if (identifier.length < 3) {
-      identifierError = 'Enter your email or username (at least 3 characters).';
-    }
-    if (identifierError) errors.email = identifierError;
+    const identifierError = validateIdentifier(identifier);
+    if (identifierError) errors.identifier = identifierError;
     const passwordError = validatePassword(values.password);
     if (passwordError) errors.password = passwordError;
 
@@ -181,9 +159,9 @@ export default function AuthContainer({
         identifier,
         password: values.password,
       });
-      // Remember email+password so a later "Save Credentials & Logout" can keep
-      // them on this device for one-tap sign-in.
-      rememberPassword(data.user.email, values.password);
+      // Remember phone/username + password so a later "Save Credentials &
+      // Logout" can keep them on this device for one-tap sign-in.
+      rememberPassword(identifier, values.password);
       completeAuth(data);
     } catch (err) {
       setFieldErrors(err.fieldErrors || {});
@@ -197,15 +175,19 @@ export default function AuthContainer({
     setAuthError('');
     setLoading(true);
 
-    const name = values.fullName.trim().replace(/\s+/g, ' ');
-    const email = values.email.trim();
+    const displayName = values.displayName.trim().replace(/\s+/g, ' ');
+    const phoneNumber = values.phoneNumber.trim();
+    const username = values.username.trim();
     const errors = {};
 
-    const nameError = validateFullName(name);
-    if (nameError) errors.fullName = nameError;
+    const nameError = validateFullName(displayName);
+    if (nameError) errors.displayName = nameError;
 
-    const emailError = validateEmail(email);
-    if (emailError) errors.email = emailError;
+    const phoneError = validatePhoneNumber(phoneNumber);
+    if (phoneError) errors.phoneNumber = phoneError;
+
+    const usernameError = validateUsername(username);
+    if (usernameError) errors.username = usernameError;
 
     const passwordError = validatePassword(values.password);
     if (passwordError) errors.password = passwordError;
@@ -224,30 +206,16 @@ export default function AuthContainer({
 
     try {
       const data = await apiPost('/api/auth/signup', {
-        name,
-        email,
+        displayName,
+        phoneNumber,
+        username,
         password: values.password,
       });
-      rememberPassword(data.user.email, values.password);
+      rememberPassword(phoneNumber, values.password);
       completeAuth(data);
     } catch (err) {
       setFieldErrors(err.fieldErrors || {});
       setAuthError(err.message || 'Something went wrong. Please try again.');
-      setLoading(false);
-    }
-  }
-
-  async function handleGoogleCredential(credential) {
-    setAuthError('');
-    setLoading(true);
-
-    try {
-      const data = await apiPost('/api/auth/google', { credential });
-      clearRememberedPassword();
-      completeAuth(data);
-    } catch (err) {
-      setFieldErrors(err.fieldErrors || {});
-      setAuthError(err.message || 'Google sign-in failed.');
       setLoading(false);
     }
   }
@@ -275,7 +243,10 @@ export default function AuthContainer({
   async function handleSavedProfileTap(profile) {
     if (!canFastAuth(profile)) {
       // "Logout Only" card: keep the profile visible but require a password.
-      setValues((prev) => ({ ...prev, email: profile.username || profile.email }));
+      setValues((prev) => ({
+        ...prev,
+        identifier: profile.identifier || profile.username || profile.phoneNumber,
+      }));
       setTab(TABS.SIGN_IN);
       setFieldErrors({});
       setAuthError('');
@@ -296,7 +267,7 @@ export default function AuthContainer({
     remove(userId);
   }
 
-  const content = (
+  return (
     <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[var(--luna-bg)] px-4 py-12">
       {/* Ambient gradient backdrop */}
       <div
@@ -384,6 +355,7 @@ export default function AuthContainer({
                         >
                           <X className="h-3.5 w-3.5" />
                         </button>
+                        
                         {busy && (
                           <span className="absolute inset-0 flex items-center justify-center rounded-2xl bg-white/60 dark:bg-black/40">
                             <Loader2 className="h-4 w-4 animate-spin text-[#7C3AED]" />
@@ -493,35 +465,60 @@ export default function AuthContainer({
                     />
                     <input
                       type="text"
-                      name="fullName"
-                      placeholder="Full name"
+                      name="displayName"
+                      placeholder="Display name"
                       autoComplete="name"
-                      value={values.fullName}
-                      onChange={(e) => setValue('fullName', e.target.value)}
-                      className={inputClass(!!fieldErrors.fullName)}
+                      value={values.displayName}
+                      onChange={(e) => setValue('displayName', e.target.value)}
+                      className={inputClass(!!fieldErrors.displayName)}
                     />
                   </div>
-                  <FieldError message={fieldErrors.fullName} />
+                  <FieldError message={fieldErrors.displayName} />
+                </div>
+              )}
+
+              {!isSignIn && (
+                <div>
+                  <div className="relative">
+                    <User
+                      aria-hidden="true"
+                      className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500"
+                    />
+                    <input
+                      type="text"
+                      name="username"
+                      placeholder="Username"
+                      autoComplete="username"
+                      value={values.username}
+                      onChange={(e) => setValue('username', e.target.value)}
+                      className={inputClass(!!fieldErrors.username)}
+                    />
+                  </div>
+                  <FieldError message={fieldErrors.username} />
                 </div>
               )}
 
               <div>
                 <div className="relative">
-                  <Mail
+                  <Phone
                     aria-hidden="true"
                     className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500"
                   />
                   <input
-                    type="email"
-                    name="email"
-                    placeholder="Email or username"
-                    autoComplete="email"
-                    value={values.email}
-                    onChange={(e) => setValue('email', e.target.value)}
-                    className={inputClass(!!fieldErrors.email)}
+                    type="tel"
+                    name="phoneNumber"
+                    placeholder={isSignIn ? 'Phone number or username' : 'Phone number'}
+                    autoComplete={isSignIn ? 'tel' : 'tel-national'}
+                    value={isSignIn ? values.identifier : values.phoneNumber}
+                    onChange={(e) =>
+                      setValue(isSignIn ? 'identifier' : 'phoneNumber', e.target.value)
+                    }
+                    className={inputClass(
+                      !!fieldErrors[isSignIn ? 'identifier' : 'phoneNumber']
+                    )}
                   />
                 </div>
-                <FieldError message={fieldErrors.email} />
+                <FieldError message={fieldErrors[isSignIn ? 'identifier' : 'phoneNumber']} />
               </div>
 
               <PasswordInput
@@ -576,85 +573,12 @@ export default function AuthContainer({
               </motion.button>
             </form>
 
-            {/* Divider */}
-            <div className="my-6 flex items-center gap-3">
-              <span className="h-px flex-1 bg-gray-200 dark:bg-gray-700" />
-              <span className="text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
-                or continue with
-              </span>
-              <span className="h-px flex-1 bg-gray-200 dark:bg-gray-700" />
-            </div>
-
-            {GOOGLE_CLIENT_ID ? (
-              <GoogleLogin
-                onSuccess={({ credential }) => {
-                  if (credential) handleGoogleCredential(credential);
-                }}
-                onError={() => {
-                  setLoading(false);
-                  setAuthError('Google sign-in failed. Please try again.');
-                }}
-                shape="pill"
-                theme="filled_black"
-                text="continue_with"
-                size="large"
-                render={({ onClick }) => (
-                  <motion.button
-                    type="button"
-                    onClick={onClick}
-                    disabled={loading}
-                    whileTap={{ scale: 0.98 }}
-                    className="flex w-full items-center justify-center gap-2 rounded-xl border border-gray-200 bg-[var(--luna-surface-2)] px-4 py-2.5 text-sm font-medium text-gray-700 transition hover:border-[#7C3AED]/50 dark:border-gray-700 dark:bg-gray-800/60 dark:text-gray-200 disabled:cursor-not-allowed disabled:opacity-70"
-                  >
-                    <GoogleIcon className="h-4 w-4" />
-                    Continue with Google
-                  </motion.button>
-                )}
-              />
-            ) : (
-              <button
-                type="button"
-                onClick={() =>
-                  setAuthError(
-                    'Google sign-in is not configured. Add NEXT_PUBLIC_GOOGLE_CLIENT_ID to .env.local.'
-                  )
-                }
-                className="flex w-full items-center justify-center gap-2 rounded-xl border border-gray-200 bg-[var(--luna-surface-2)] px-4 py-2.5 text-sm font-medium text-gray-700 transition hover:border-[#7C3AED]/50 dark:border-gray-700 dark:bg-gray-800/60 dark:text-gray-200"
-              >
-                <GoogleIcon className="h-4 w-4" />
-                Continue with Google
-              </button>
-            )}
-
-            {/* Apple Sign-In (coming soon) */}
-            <button
-              type="button"
-              onClick={() =>
-                setAuthError('Apple Sign-In is coming soon. Use email or Google for now.')
-              }
-              className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-gray-200 bg-[var(--luna-surface-2)] px-4 py-2.5 text-sm font-medium text-gray-700 transition hover:border-[#7C3AED]/50 dark:border-gray-700 dark:bg-gray-800/60 dark:text-gray-200"
-            >
-              <AppleIcon className="h-4 w-4" />
-              Continue with Apple
-            </button>
+            <p className="mt-6 text-center text-xs text-gray-500 dark:text-gray-400">
+              By continuing you agree to Luna&apos;s terms &amp; privacy policy.
+            </p>
           </motion.div>
-
-          <p className="mt-6 text-center text-xs text-gray-500 dark:text-gray-400">
-            By continuing you agree to Luna&apos;s terms &amp; privacy policy.
-          </p>
         </motion.div>
-      </div>
-
-      {/* Theme toggle, visible on the auth screen */}
-      <div className="absolute top-5 right-5">
-        <ThemeToggle />
       </div>
     </main>
   );
-
-  if (!GOOGLE_CLIENT_ID) {
-    return content;
-  }
-
-  return <GoogleOAuthProvider clientId={GOOGLE_CLIENT_ID}>{content}</GoogleOAuthProvider>;
 }

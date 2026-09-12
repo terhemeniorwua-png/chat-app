@@ -27,7 +27,7 @@ const resetTokenSnapshot = () =>
 function ResetPasswordContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const email = searchParams.get('email') || '';
+  const phone = searchParams.get('phone') || '';
 
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -173,12 +173,12 @@ function ResetPasswordContent() {
           ) : (
             <form onSubmit={handleSubmit} className="space-y-4" noValidate>
               <header>
-                <h1 className="text-2xl font-bold tracking-tight text-white">
+                <h1 className="text-2xl font-bold tracking-tight text-gray-900 dark:text-white">
                   Set a new password
                 </h1>
-                <p className="mt-1.5 text-sm text-gray-400">
-                  {email
-                    ? `Choose a new password for ${email}.`
+                <p className="mt-1.5 text-sm text-gray-500 dark:text-gray-400">
+                  {phone
+                    ? `Choose a new password for ${phone}.`
                     : 'Choose a new password for your account.'}
                 </p>
               </header>

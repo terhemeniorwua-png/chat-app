@@ -5,6 +5,8 @@
 
 export const NAME_RE = /^[a-zA-Z\s-]+$/;
 export const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+export const PHONE_RE = /^\+?[0-9][0-9\s()\-]{6,19}$/;
+export const USERNAME_RE = /^[a-z0-9_.]{3,30}$/;
 export const PASSWORD_RE =
   /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&-_])[A-Za-z\d@$!%*?&-_]{5,}$/;
 
@@ -12,6 +14,22 @@ export function validateFullName(value) {
   const v = (value ?? '').trim();
   if (!v) return 'Full name is required.';
   if (!NAME_RE.test(v)) return 'Name can only contain letters, spaces, and hyphens.';
+  return '';
+}
+
+export function validatePhoneNumber(value) {
+  const v = (value ?? '').trim();
+  if (!v) return 'Phone number is required.';
+  if (!PHONE_RE.test(v)) return 'Please enter a valid phone number.';
+  return '';
+}
+
+export function validateUsername(value) {
+  const v = (value ?? '').trim();
+  if (!v) return 'Username is required.';
+  if (!USERNAME_RE.test(v.toLowerCase())) {
+    return 'Username must be 3-30 characters: letters, numbers, underscore, dot.';
+  }
   return '';
 }
 

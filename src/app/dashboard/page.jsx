@@ -1,31 +1,33 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import { motion } from 'framer-motion';
 import { useSession } from '@/hooks/useSession';
 
-/**
- * Landing for the signed-in user. Sessions come from `@/hooks/useSession`
- * (fast-auth restore / event-driven), so a hard refresh here re-attaches the
- * active account instead of bouncing through the auth screen.
- */
 const ChatHub = dynamic(() => import('@/components/chat/ChatHub'), {
   ssr: false,
 });
 
 function DashboardGate() {
-  const { session } = useSession();
+  const { session, loading } = useSession(); // Include loading if available from your hook
   const router = useRouter();
+  const [isMounted, setIsMounted] = useState(false);
+
+  // Guarantee hydration matches SSR output before switching UI
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
 
   useEffect(() => {
-    if (!session) {
+    if (isMounted && !session && !loading) {
       router.replace('/');
     }
-  }, [session, router]);
+  }, [isMounted, session, loading, router]);
 
-  if (!session) {
+  // Render spinner during SSR and initial client hydration turn
+  if (!isMounted || !session) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-[#1F2937]">
         <motion.div

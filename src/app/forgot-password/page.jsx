@@ -1,24 +1,23 @@
 'use client';
 
 import { Suspense, useState } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
-import { ArrowLeft, Loader2, Mail } from 'lucide-react';
+import { ArrowLeft, Loader2, Phone } from 'lucide-react';
 import BrandMark from '@/components/BrandMark';
 import { FieldError, inputClass } from '@/components/fields';
-import { validateEmail } from '@/lib/validation';
+import { validatePhoneNumber } from '@/lib/validation';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
 
 /**
- * Step 1 of the password-recovery flow. Asks the Luna API for a 5-digit reset
- * code and, on success, forwards to the code-entry screen
- * (/forgot-password/verify?email=...).
+ * Step 1 of the SMS password-recovery flow. Requests a 6-digit OTP for the
+ * registered phone number (mocked SMS is logged server-side) and forwards to
+ * /forgot-password/verify?phone=... on success.
  */
 function ForgotPasswordRequest() {
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const [email, setEmail] = useState(searchParams.get('email') || '');
+  const [phoneNumber, setPhoneNumber] = useState('');
   const [fieldError, setFieldError] = useState('');
   const [authError, setAuthError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -28,31 +27,31 @@ function ForgotPasswordRequest() {
     setFieldError('');
     setAuthError('');
 
-    const value = email.trim();
-    const emailError = validateEmail(value);
-    if (emailError) {
-      setFieldError(emailError);
+    const value = phoneNumber.trim();
+    const phoneError = validatePhoneNumber(value);
+    if (phoneError) {
+      setFieldError(phoneError);
       return;
     }
 
     setLoading(true);
 
     try {
-      const res = await fetch(`${API_URL}/api/auth/forgot-password`, {
+      const res = await fetch(`${API_URL}/api/auth/forgot-password/send-otp`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: value }),
+        body: JSON.stringify({ phoneNumber: value }),
       });
       const data = await res.json().catch(() => ({}));
 
       if (!res.ok) {
-        setFieldError(data.fieldErrors?.email || '');
+        setFieldError(data.fieldErrors?.phoneNumber || '');
         setAuthError(data.message || 'Something went wrong. Please try again.');
         setLoading(false);
         return;
       }
 
-      router.push(`/forgot-password/verify?email=${encodeURIComponent(value)}`);
+      router.push(`/forgot-password/verify?phone=${encodeURIComponent(value)}`);
     } catch {
       setAuthError('Could not reach the Luna server. Please make sure it is running.');
       setLoading(false);
@@ -60,7 +59,7 @@ function ForgotPasswordRequest() {
   }
 
   return (
-    <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[#1F2937] px-4 py-12">
+    <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[var(--luna-bg)] px-4 py-12">
       {/* Ambient gradient backdrop */}
       <div
         aria-hidden="true"
@@ -80,16 +79,16 @@ function ForgotPasswordRequest() {
           initial={{ opacity: 0, y: 24 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5, ease: 'easeOut' }}
-          className="w-full rounded-3xl border border-white/10 bg-white/5 p-6 shadow-2xl backdrop-blur-xl sm:p-8"
+          className="w-full rounded-3xl border border-gray-200 bg-white p-6 shadow-2xl dark:border-white/10 dark:bg-white/5 sm:p-8"
         >
           <form onSubmit={handleSubmit} className="space-y-4" noValidate>
             <header>
-              <h1 className="text-2xl font-bold tracking-tight text-white">
+              <h1 className="text-2xl font-bold tracking-tight text-gray-900 dark:text-white">
                 Forgot password?
               </h1>
-              <p className="mt-1.5 text-sm text-gray-400">
-                No worries — enter the email linked to your account and we&apos;ll
-                send you a 5-digit code to reset it.
+              <p className="mt-1.5 text-sm text-gray-500 dark:text-gray-400">
+                No worries — enter the phone number linked to your account and
+                we&apos;ll text you a 6-digit code to reset it.
               </p>
             </header>
 
@@ -106,18 +105,18 @@ function ForgotPasswordRequest() {
 
             <div>
               <div className="relative">
-                <Mail
+                <Phone
                   aria-hidden="true"
                   className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500"
                 />
                 <input
-                  type="email"
-                  name="email"
-                  placeholder="Email"
-                  autoComplete="email"
-                  value={email}
+                  type="tel"
+                  name="phoneNumber"
+                  placeholder="Phone number"
+                  autoComplete="tel"
+                  value={phoneNumber}
                   onChange={(e) => {
-                    setEmail(e.target.value);
+                    setPhoneNumber(e.target.value);
                     if (fieldError) setFieldError('');
                     if (authError) setAuthError('');
                   }}
@@ -139,7 +138,7 @@ function ForgotPasswordRequest() {
                   Sending code…
                 </>
               ) : (
-                'Send reset code'
+                'Send OTP'
               )}
             </motion.button>
 
@@ -147,7 +146,7 @@ function ForgotPasswordRequest() {
               <button
                 type="button"
                 onClick={() => router.push('/auth')}
-                className="flex items-center gap-1.5 text-gray-400 transition hover:text-gray-200"
+                className="flex items-center gap-1.5 text-gray-500 transition hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200"
               >
                 <ArrowLeft className="h-4 w-4" />
                 Back to sign in

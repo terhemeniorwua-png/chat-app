@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Loader2, UserPlus } from 'lucide-react';
-import { apiGet, apiPost, getToken } from '@/lib/api';
+import { apiDelete, apiGet, apiPost, getToken } from '@/lib/api';
 import UserCard from '@/components/UserCard';
 // import { Link } from 'lucide-react';
 
@@ -50,7 +50,7 @@ export default function SuggestionsPage() {
   const handleAdd = async (user) => {
     setPendingId(user.id);
     try {
-      await apiPost('/api/friends/request/send', { recipientId: user.id });
+      await apiPost('/api/friends/request', { recipientId: user.id });
       setSentIds((prev) => [...prev, user.id]);
     } catch (err) {
       if (err.message !== 'Session expired. Please sign in again.') {
@@ -64,7 +64,7 @@ export default function SuggestionsPage() {
   const handleCancel = async (user) => {
     setCancellingId(user.id);
     try {
-      await apiPost('/api/friends/request/cancel', { recipientId: user.id });
+      await apiDelete(`/api/friends/request?recipientId=${encodeURIComponent(user.id)}`);
       setSentIds((prev) => prev.filter((id) => id !== user.id));
     } catch (err) {
       if (err.message !== 'Session expired. Please sign in again.') {

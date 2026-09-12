@@ -2,10 +2,30 @@ import { Schema, model } from 'mongoose';
 
 const NAME_RE = /^[a-zA-Z\s-]+$/;
 const EMAIL_RE = /^\S+@\S+\.\S+$/;
+// Loose international number: + digits, spaces, dashes, parens. Length bounds
+// keep the field user-friendly while staying permissive about formatting.
+const PHONE_RE = /^\+?[0-9][0-9\s()\-]{6,19}$/;
+
+const requestEntrySchema = new Schema(
+  {
+    senderId: {
+      type: Schema.Types.ObjectId,
+      ref: 'User',
+      required: true,
+    },
+    status: {
+      type: String,
+      enum: ['pending', 'accepted', 'declined'],
+      default: 'pending',
+    },
+  },
+  { _id: false }
+);
 
 const userSchema = new Schema(
   {
-    name: {
+    // Spec field: displayName (aliased for backwards compatibility below).
+    displayName: {
       type: String,
       required: [true, 'Full name is required.'],
       trim: true,
@@ -14,13 +34,20 @@ const userSchema = new Schema(
         message: () => 'Name can only contain letters, spaces, and hyphens.',
       },
     },
+    phoneNumber: {
+      type: String,
+      required: false,
+      trim: true,
+      match: [PHONE_RE, 'Please enter a valid phone number.'],
+    },
+    // Legacy field, kept only for accounts created before phone sign-up. New
+    // sign-ups go through phoneNumber. Sparse unique so phone-only users coexist.
     email: {
       type: String,
-      required: [true, 'Email is required.'],
-      unique: true,
+      required: false,
       lowercase: true,
       trim: true,
-      match: [/^\S+@\S+\.\S+$/, 'Please enter a valid email address.'],
+      match: [EMAIL_RE, 'Please enter a valid email address.'],
     },
     username: {
       type: String,
@@ -34,17 +61,11 @@ const userSchema = new Schema(
       required: false,
       default: null,
     },
-    googleId: {
-      type: String,
-      required: false,
-    },
     avatarUrl: {
       type: String,
       required: false,
       default: '',
     },
-    // Rotating refresh credentials: hashed server-side, never stored raw. The
-    // active session's refresh token is vaulted on the client device instead.
     refreshTokens: [
       {
         tokenHash: { type: String, required: true },
@@ -53,7 +74,8 @@ const userSchema = new Schema(
         createdAt: { type: Date, default: Date.now },
       },
     ],
-    // One-time passcode sign-in (auto sign-up for new emails).
+    // One-time passcode (password recovery via SMS). Reused both for reset
+    // codes and any future SMS sign-in.
     otpHash: {
       type: String,
       required: false,
@@ -62,24 +84,22 @@ const userSchema = new Schema(
       type: Date,
       required: false,
     },
-    otpNewUser: {
-      type: Boolean,
-      default: false,
-    },
-    resetCodeHash: {
-      type: String,
-      required: false,
-    },
-    resetCodeExpiresAt: {
-      type: Date,
-      required: false,
-    },
     resetTokenHash: {
       type: String,
       required: false,
     },
-    // Friend relationships: each entry is the _id of another User. An accepted
-    // friend request appends both users to each other's array.
+    // Friend relationships per the spec schema:
+    //  - sentRequests: target userIds this user sent a pending request to.
+    //  - friendRequests: inbox entries { senderId, status } for requests
+    //    others have sent THIS user.
+    //  - friends: connected userIds (mutual).
+    sentRequests: [
+      {
+        type: Schema.Types.ObjectId,
+        ref: 'User',
+      },
+    ],
+    friendRequests: [requestEntrySchema],
     friends: [
       {
         type: Schema.Types.ObjectId,
@@ -101,20 +121,35 @@ const userSchema = new Schema(
   { timestamps: true }
 );
 
-// Allow many users without a Google account (sparse unique index on googleId).
-userSchema.index({ googleId: 1 }, { unique: true, sparse: true });
-// Allow many users without a username yet (sparse unique index on username).
+// Sparse unique indexes: allow many users without each field present while
+// guaranteeing uniqueness for everyone who sets one.
+userSchema.index({ phoneNumber: 1 }, { unique: true, sparse: true });
+userSchema.index({ email: 1 }, { unique: true, sparse: true });
 userSchema.index({ username: 1 }, { unique: true, sparse: true });
+// Fast lookups of a user's request inbox and sent list.
+userSchema.index({ 'friendRequests.senderId': 1, 'friendRequests.status': 1 });
+userSchema.index({ sentRequests: 1 });
+
+// Backwards-compatible alias: legacy code reading/writing `user.name` keeps
+// working while the authoritative field is `displayName`.
+userSchema.alias('displayName', 'name');
+
+// Fast inbox lookup used by the accept/decline handlers.
+userSchema.methods.findFriendRequestFrom = function findFriendRequestFrom(senderId) {
+  return (this.friendRequests || []).find(
+    (entry) => entry.senderId?.toString() === senderId.toString()
+  );
+};
 
 /**
- * Backfill/derive a unique username (email prefix + numeric suffix on clash).
- * Used by every auth path so accounts created before usernames existed and
- * social/OTP accounts without one always have a handle for the picker UI.
+ * Backfill/derive a unique username (phone suffix + numeric fallback, with
+ * legacy email-prefix handling for pre-phone accounts). Used by every auth
+ * path to guarantee a handle for the picker UI.
  */
 userSchema.methods.ensureUsername = async function ensureUsername() {
   if (this.username) return this.username;
 
-  const raw = (this.email || '').split('@')[0] || '';
+  const raw = this.phoneNumber || this.email || '';
   const base =
     raw.toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 20) || 'user';
 
@@ -139,8 +174,11 @@ userSchema.methods.ensureUsername = async function ensureUsername() {
 userSchema.methods.toPublicJSON = function toPublicJSON() {
   return {
     id: this._id.toString(),
-    name: this.name,
-    email: this.email,
+    displayName: this.displayName || this.name || '',
+    // Legacy alias for pre-migration consumers.
+    name: this.displayName || this.name || '',
+    phoneNumber: this.phoneNumber || '',
+    email: this.email || '',
     username: this.username || '',
     avatarUrl: this.avatarUrl || '',
     createdAt: this.createdAt,

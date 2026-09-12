@@ -1,37 +1,41 @@
 'use client';
-import { useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { 
-  MessageSquare, Phone, Users, UserCheck, Bookmark, Settings, 
-  ChevronDown, Send, LogOut, Camera, Loader2
+import {
+  MessageSquare,
+  Phone,
+  Users,
+  UserCheck,
+  Bookmark,
+  Settings,
+  ChevronDown,
+  Send,
+  LogOut,
 } from 'lucide-react';
-import ThemeToggle from '@/components/ThemeToggle';
 
 /**
  * Navigation + account shell for the ChatHub dashboard.
+ *
+ * Theme, avatar and account edits live exclusively in the Settings view
+ * (/settings) — nothing here toggles themes or uploads pictures.
  *
  * @param {object} props
  * @param {string} props.activeTab - active nav item id.
  * @param {(tab: string) => void} props.setActiveTab
  * @param {import('@/lib/constants').AuthUser} [props.user] - current user (renders in footer).
- * @param {() => void} [props.onLogout] - opens the LogoutModal.
- * @param {(dataUrl: string) => void} [props.onAvatarUpload] - uploads a chosen profile picture.
- * @param {boolean} [props.avatarUploading=false]
+ * @param {() => void} props.onLogout - opens the LogoutModal.
  */
-export default function Sidebar({ activeTab, setActiveTab, user, onLogout, onAvatarUpload, avatarUploading = false }) {
+export default function Sidebar({ activeTab, setActiveTab, user, onLogout }) {
   const router = useRouter();
-  const fileInputRef = useRef(null);
-  const [pickerError, setPickerError] = useState(false);
   const navItems = [
     { id: 'chats', label: 'Chats', icon: MessageSquare },
     { id: 'calls', label: 'Calls', icon: Phone },
     { id: 'contacts', label: 'Contacts', icon: Users, href: '/social' },
     { id: 'groups', label: 'Groups', icon: UserCheck },
     { id: 'saved', label: 'Saved', icon: Bookmark },
-    { id: 'settings', label: 'Settings', icon: Settings },
+    { id: 'settings', label: 'Settings', icon: Settings, href: '/settings' },
   ];
 
-  const displayName = user?.name || 'Guest';
+  const displayName = user?.displayName || user?.name || 'Guest';
   const initials = displayName.charAt(0).toUpperCase();
 
   function handleNav(item) {
@@ -40,21 +44,6 @@ export default function Sidebar({ activeTab, setActiveTab, user, onLogout, onAva
       return;
     }
     setActiveTab(item.id);
-  }
-
-  function handleFileChange(e) {
-    const file = e.target.files?.[0];
-    e.target.value = '';
-    if (!file) return;
-    if (!file.type.startsWith('image/')) {
-      setPickerError(true);
-      return;
-    }
-    setPickerError(false);
-    const reader = new FileReader();
-    reader.onload = () => onAvatarUpload?.(reader.result);
-    reader.onerror = () => setPickerError(true);
-    reader.readAsDataURL(file);
   }
 
   return (
@@ -100,65 +89,35 @@ export default function Sidebar({ activeTab, setActiveTab, user, onLogout, onAva
         </nav>
       </div>
 
-      {/* Footer Section: Theme Toggle & Current User Profile */}
+      {/* Footer Section: Current User Profile */}
       <div className="space-y-4 pt-4 border-t border-gray-800">
-        <div className="flex items-center justify-between px-2 text-gray-400 text-sm">
-          <span>Theme</span>
-          <ThemeToggle variant="pill" />
-        </div>
-
-        <div className="flex items-center justify-between p-2 rounded-xl bg-gray-800/50 hover:bg-gray-800 transition cursor-pointer">
+        <div className="flex items-center justify-between p-2 rounded-xl bg-gray-800/50 hover:bg-gray-800 transition cursor-pointer" onClick={() => router.push('/settings')}>
           <div className="flex items-center gap-3">
-            {/* Clickable profile picture: opens a device photo picker */}
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={avatarUploading}
-              aria-label={`Change ${displayName}'s profile picture`}
-              className="group relative disabled:cursor-not-allowed"
-            >
-              {user?.avatarUrl ? (
-                <img
-                  src={user.avatarUrl}
-                  alt={displayName}
-                  className="w-10 h-10 rounded-full object-cover"
-                />
-              ) : (
-                <div className="w-10 h-10 rounded-full bg-[#7C3AED] flex items-center justify-center text-sm font-bold text-white">
-                  {initials}
-                </div>
-              )}
-              <span className="absolute bottom-0 right-0 w-3 h-3 bg-[#10B981] border-2 border-[#1F2937] rounded-full"></span>
-              <span className="absolute -inset-px flex items-center justify-center rounded-full bg-black/45 opacity-0 transition group-hover:opacity-100">
-                {avatarUploading ? (
-                  <Loader2 className="w-4 h-4 text-white animate-spin" />
-                ) : (
-                  <Camera className="w-4 h-4 text-white" />
-                )}
-              </span>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*"
-                className="hidden"
-                aria-hidden="true"
-                tabIndex={-1}
-                onChange={handleFileChange}
+            {user?.avatarUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element -- user avatar data URL; Image needs a configured loader
+              <img
+                src={user.avatarUrl}
+                alt={displayName}
+                className="w-10 h-10 rounded-full object-cover"
               />
-            </button>
+            ) : (
+              <div className="w-10 h-10 rounded-full bg-[#7C3AED] flex items-center justify-center text-sm font-bold text-white">
+                {initials}
+              </div>
+            )}
             <div>
               <p className="text-sm font-semibold text-white leading-tight">{displayName}</p>
               <p className="text-xs text-[#10B981]">Available</p>
-              {pickerError && (
-                <p className="text-[10px] text-[#F87171]">Please choose an image file.</p>
-              )}
             </div>
           </div>
           <div className="flex items-center gap-1">
             <button
               type="button"
               aria-label="Log out"
-              onClick={onLogout}
+              onClick={(e) => {
+                e.stopPropagation();
+                onLogout?.();
+              }}
               className="p-1.5 rounded-lg text-gray-400 hover:bg-gray-700 hover:text-white transition"
             >
               <LogOut className="w-4 h-4" />

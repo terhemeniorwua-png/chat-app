@@ -18,10 +18,10 @@ export default function RequestCard({ request, busy, onAccept, onDecline }) {
       className="flex items-center justify-between gap-4 rounded-2xl border border-gray-200 bg-white p-5 shadow-lg dark:border-white/10 dark:bg-white/5"
     >
       <div className="flex min-w-0 items-center gap-3">
-        <Avatar name={sender.name} src={sender.avatarUrl} size="md" />
+        <Avatar name={sender.displayName} src={sender.avatarUrl} size="md" />
         <div className="min-w-0">
           <p className="truncate text-sm font-semibold text-gray-900 dark:text-white">
-            {sender.name}
+            {sender.displayName}
           </p>
           <p className="truncate text-xs text-gray-500 dark:text-gray-400">
             {sender.username ? `@${sender.username}` : sender.email}

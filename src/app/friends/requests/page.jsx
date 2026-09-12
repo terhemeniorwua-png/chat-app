@@ -47,7 +47,7 @@ export default function RequestsPage() {
   const act = async (request, action) => {
     setBusy({ id: request.id, action });
     try {
-      await apiPost(`/api/friends/request/${action}`, { requestId: request.id });
+      await apiPost(`/api/friends/request/${action}`, { senderId: request.sender.id });
       setRequests((prev) => prev.filter((r) => r.id !== request.id));
     } catch (err) {
       if (err.message !== 'Session expired. Please sign in again.') {

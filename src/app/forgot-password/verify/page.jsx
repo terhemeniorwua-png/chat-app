@@ -7,29 +7,30 @@ import { ArrowLeft, KeyRound, Loader2 } from 'lucide-react';
 import BrandMark from '@/components/BrandMark';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
-const CODE_LENGTH = 5;
+const CODE_LENGTH = 6;
 const RESET_TOKEN_KEY = 'luna_reset_token';
 
 function codeInputClass(hasError, filled) {
   return [
-    'h-14 w-12 rounded-xl border bg-gray-800/70 text-center text-xl font-bold text-white outline-none transition focus:ring-2 sm:w-14',
-    filled && !hasError ? 'border-gray-500/70' : '',
+    'h-14 w-11 rounded-xl border bg-gray-100 text-center text-xl font-bold text-gray-900 outline-none transition focus:ring-2 sm:w-12 dark:bg-gray-800 dark:text-white',
+    filled && !hasError ? 'border-gray-400 dark:border-gray-500/70' : '',
     hasError
       ? 'border-[#EF4444]/70 focus:border-[#EF4444] focus:ring-[#EF4444]/30'
-      : 'border-gray-700/80 focus:border-[#7C3AED] focus:ring-[#7C3AED]/40',
+      : 'border-gray-300 focus:border-[#7C3AED] focus:ring-[#7C3AED]/40 dark:border-gray-700/80',
   ].join(' ');
 }
 
 /**
- * Step 2 of the password-recovery flow. Collects the emailed 5-digit code in
- * five single-digit boxes (auto-advance, backspace, arrow keys and paste all
- * work), verifies it via POST /api/auth/verify-code, then stashes the returned
- * reset token in sessionStorage and forwards to /forgot-password/reset.
+ * Step 2 of the SMS password-recovery flow. Collects the 6-digit code in six
+ * single-digit boxes (auto-advance, backspace, arrow keys and paste all work),
+ * verifies it via POST /api/auth/forgot-password/verify-otp, then stashes the
+ * returned reset token in sessionStorage and forwards to
+ * /forgot-password/reset.
  */
 function VerifyCodeContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const email = searchParams.get('email') || '';
+  const phoneNumber = searchParams.get('phone') || '';
 
   const [digits, setDigits] = useState(() => Array(CODE_LENGTH).fill(''));
   const [authError, setAuthError] = useState('');
@@ -84,7 +85,7 @@ function VerifyCodeContent() {
   async function handleSubmit(e) {
     e.preventDefault();
     if (!complete) {
-      setAuthError('Please enter all 5 digits.');
+      setAuthError('Please enter all 6 digits.');
       return;
     }
 
@@ -92,10 +93,10 @@ function VerifyCodeContent() {
     setLoading(true);
 
     try {
-      const res = await fetch(`${API_URL}/api/auth/verify-code`, {
+      const res = await fetch(`${API_URL}/api/auth/forgot-password/verify-otp`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, code }),
+        body: JSON.stringify({ phoneNumber, code }),
       });
       const data = await res.json().catch(() => ({}));
 
@@ -106,7 +107,7 @@ function VerifyCodeContent() {
       }
 
       sessionStorage.setItem(RESET_TOKEN_KEY, data.resetToken);
-      router.push(`/forgot-password/reset?email=${encodeURIComponent(email)}`);
+      router.push(`/forgot-password/reset?phone=${encodeURIComponent(phoneNumber)}`);
     } catch {
       setAuthError('Could not reach the Luna server. Please make sure it is running.');
       setLoading(false);
@@ -114,7 +115,7 @@ function VerifyCodeContent() {
   }
 
   return (
-    <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[#1F2937] px-4 py-12">
+    <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[var(--luna-bg)] px-4 py-12">
       {/* Ambient gradient backdrop */}
       <div
         aria-hidden="true"
@@ -134,14 +135,14 @@ function VerifyCodeContent() {
           initial={{ opacity: 0, y: 24 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5, ease: 'easeOut' }}
-          className="w-full rounded-3xl border border-white/10 bg-white/5 p-6 shadow-2xl backdrop-blur-xl sm:p-8"
+          className="w-full rounded-3xl border border-gray-200 bg-white p-6 shadow-2xl dark:border-white/10 dark:bg-white/5 sm:p-8"
         >
-          {!email ? (
+          {!phoneNumber ? (
             <div className="flex flex-col items-center py-6 text-center">
-              <h2 className="text-2xl font-bold tracking-tight text-white">
-                Missing email
+              <h2 className="text-2xl font-bold tracking-tight text-gray-900 dark:text-white">
+                Missing phone number
               </h2>
-              <p className="mt-2 text-sm text-gray-400">
+              <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
                 Something went wrong. Please restart the password recovery flow.
               </p>
               <button
@@ -160,12 +161,15 @@ function VerifyCodeContent() {
                   aria-hidden="true"
                   className="mx-auto h-10 w-10 text-[#7C3AED]"
                 />
-                <h2 className="mt-3 text-2xl font-bold tracking-tight text-white">
-                  Check your inbox
+                <h2 className="mt-3 text-2xl font-bold tracking-tight text-gray-900 dark:text-white">
+                  Check your phone
                 </h2>
-                <p className="mt-1.5 text-sm text-gray-400">
-                  We sent a 5-digit code to
-                  <span className="font-medium text-gray-200"> {email} </span>
+                <p className="mt-1.5 text-sm text-gray-500 dark:text-gray-400">
+                  We texted a 6-digit code to
+                  <span className="font-medium text-gray-700 dark:text-gray-200">
+                    {' '}
+                    {phoneNumber}{' '}
+                  </span>
                   . It expires in 10 minutes.
                 </p>
               </header>
@@ -182,7 +186,7 @@ function VerifyCodeContent() {
               )}
 
               <fieldset disabled={loading}>
-                <legend className="sr-only">5-digit verification code</legend>
+                <legend className="sr-only">6-digit verification code</legend>
                 <div className="flex justify-center gap-2 sm:gap-3">
                   {digits.map((digit, index) => (
                     <input
@@ -222,12 +226,12 @@ function VerifyCodeContent() {
                 )}
               </motion.button>
 
-              <p className="text-center text-sm text-gray-400">
+              <p className="text-center text-sm text-gray-500 dark:text-gray-400">
                 Didn&apos;t get the code?{' '}
                 <button
                   type="button"
                   onClick={() =>
-                    router.push(`/forgot-password?email=${encodeURIComponent(email)}`)
+                    router.push(`/forgot-password?phone=${encodeURIComponent(phoneNumber)}`)
                   }
                   className="text-[#A78BFA] transition hover:text-[#C4B5FD]"
                 >
@@ -239,7 +243,7 @@ function VerifyCodeContent() {
                 <button
                   type="button"
                   onClick={() => router.push('/auth')}
-                  className="flex items-center gap-1.5 text-gray-400 transition hover:text-gray-200"
+                  className="flex items-center gap-1.5 text-gray-500 transition hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200"
                 >
                   <ArrowLeft className="h-4 w-4" />
                   Back to sign in

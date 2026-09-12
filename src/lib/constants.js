@@ -12,7 +12,8 @@
  * @property {string} displayName
  * @property {string} avatarUrl
  * @property {boolean} hasSavedCredentials - true when the user consented to saving credentials at logout.
- * @property {string} email - saved account email (only when credentials were saved).
+ * @property {string} identifier - the login handle last used (phone/username/email) — kept for fast-auth.
+ * @property {string} email - saved account email (only when present on the account).
  * @property {string|undefined} [password] - saved account password (only when the user chose "Save Credentials & Logout") — lets tap-to-login sign in directly.
  * @property {string|undefined} [refreshToken] - present ONLY when credentials were saved (logout YES).
  * @property {boolean|undefined} [credentialsInvalid] - true after a saved credential failed validation.
@@ -23,8 +24,10 @@
  * @typedef {Object} AuthUser
  * Public account shape returned by the API (User.toPublicJSON).
  * @property {string} id
- * @property {string} name
- * @property {string} email
+ * @property {string} displayName
+ * @property {string} [name] - legacy alias for displayName.
+ * @property {string} [email]
+ * @property {string} [phoneNumber]
  * @property {string} avatarUrl
  * @property {string|undefined} [username]
  * @property {string|undefined} [createdAt]

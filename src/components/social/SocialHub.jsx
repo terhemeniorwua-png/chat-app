@@ -14,11 +14,10 @@ import {
   Users,
   X,
 } from 'lucide-react';
-import { apiGet, apiPost, getToken } from '@/lib/api';
+import { apiDelete, apiGet, apiPost, getToken } from '@/lib/api';
 import RequestCard from '@/components/RequestCard';
 import UserCard from '@/components/UserCard';
 import Avatar from '@/components/Avatar';
-import ThemeToggle from '@/components/ThemeToggle';
 
 const TABS = {
   REQUESTS: 'requests',
@@ -79,7 +78,7 @@ export default function SocialHub() {
         const [inc, out, sug] = await Promise.all([
           apiGet('/api/friends/requests/pending'),
           apiGet('/api/friends/requests/outgoing'),
-          apiGet('/api/friends/suggestions'),
+          apiGet('/api/users/suggestions'),
         ]);
         if (cancelled) return;
         setIncoming(inc.requests || []);
@@ -144,7 +143,7 @@ export default function SocialHub() {
   async function accept(request) {
     setBusyIncoming({ id: request.id, action: 'accept' });
     try {
-      await apiPost('/api/friends/request/accept', { requestId: request.id });
+      await apiPost('/api/friends/request/accept', { senderId: request.sender.id });
       setIncoming((prev) => prev.filter((r) => r.id !== request.id));
       setFlash('Connected! A 1-on-1 chat was created.');
     } catch (err) {
@@ -157,7 +156,7 @@ export default function SocialHub() {
   async function decline(request) {
     setBusyIncoming({ id: request.id, action: 'decline' });
     try {
-      await apiPost('/api/friends/request/decline', { requestId: request.id });
+      await apiPost('/api/friends/request/decline', { senderId: request.sender.id });
       setIncoming((prev) => prev.filter((r) => r.id !== request.id));
       setFlash('Request declined.');
     } catch (err) {
@@ -170,7 +169,7 @@ export default function SocialHub() {
   async function cancelOutgoing(item) {
     setBusyOutgoing(item.id);
     try {
-      await apiPost('/api/friends/request/cancel', { recipientId: item.recipient.id });
+      await apiDelete(`/api/friends/request?recipientId=${encodeURIComponent(item.recipient.id)}`);
       setOutgoing((prev) => prev.filter((r) => r.id !== item.id));
       setSentIds((prev) => prev.filter((id) => id !== item.recipient.id));
       setFlash('Request cancelled.');
@@ -184,9 +183,9 @@ export default function SocialHub() {
   async function sendRequest(user) {
     setPendingId(user.id);
     try {
-      await apiPost('/api/friends/request/send', { recipientId: user.id });
+      await apiPost('/api/friends/request', { recipientId: user.id });
       setSentIds((prev) => [...prev, user.id]);
-      setFlash(`Friend request sent to ${user.name}.`);
+      setFlash(`Friend request sent to ${user.displayName}.`);
     } catch (err) {
       if (err.message !== 'Session expired. Please sign in again.') setError(err.message);
     } finally {
@@ -197,7 +196,7 @@ export default function SocialHub() {
   async function cancelSent(user) {
     setCancellingId(user.id);
     try {
-      await apiPost('/api/friends/request/cancel', { recipientId: user.id });
+      await apiDelete(`/api/friends/request?recipientId=${encodeURIComponent(user.id)}`);
       setSentIds((prev) => prev.filter((id) => id !== user.id));
     } catch (err) {
       if (err.message !== 'Session expired. Please sign in again.') setError(err.message);
@@ -242,7 +241,6 @@ export default function SocialHub() {
             </p>
           </div>
         </div>
-        <ThemeToggle />
       </header>
 
       {/* Tabs */}
@@ -350,7 +348,7 @@ export default function SocialHub() {
             {/* Outgoing requests */}
             <section>
               <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">
-                <Send className="h-4 w-4" /> Outgoing Requests
+                <Send className="h-4 w-4" /> Sent Requests
               </h2>
               {outgoing.length === 0 ? (
                 <p className="rounded-2xl border border-dashed border-gray-300 px-4 py-6 text-sm text-gray-500 dark:border-white/15 dark:text-gray-400">
@@ -370,13 +368,13 @@ export default function SocialHub() {
                         >
                           <div className="flex min-w-0 items-center gap-3">
                             <Avatar
-                              name={item.recipient.name}
+                              name={item.recipient.displayName}
                               src={item.recipient.avatarUrl}
                               size="md"
                             />
                             <div className="min-w-0">
                               <p className="truncate text-sm font-semibold text-gray-900 dark:text-white">
-                                {item.recipient.name}
+                                {item.recipient.displayName}
                               </p>
                               <p className="truncate text-xs text-gray-500 dark:text-gray-400">
                                 {item.recipient.username
@@ -458,10 +456,10 @@ export default function SocialHub() {
                             className="flex items-center justify-between gap-3 rounded-2xl border border-gray-200 bg-white px-4 py-3 dark:border-white/10 dark:bg-white/5"
                           >
                             <div className="flex min-w-0 items-center gap-3">
-                              <Avatar name={user.name} src={user.avatarUrl} size="sm" />
+                              <Avatar name={user.displayName} src={user.avatarUrl} size="sm" />
                               <div className="min-w-0">
                                 <p className="truncate text-sm font-semibold text-gray-900 dark:text-white">
-                                  {user.name}
+                                  {user.displayName}
                                 </p>
                                 <p className="truncate text-xs text-gray-500 dark:text-gray-400">
                                   @{user.username}

@@ -16,9 +16,7 @@ import { useSyncState } from '@/hooks/useSyncState';
 import { useProfileProgress } from '@/hooks/useProfileProgress';
 import { aggregateWhileYouWereAway } from '@/lib/reengagement';
 import { STORAGE_KEYS } from '@/lib/constants';
-import { apiGet, apiPost } from '@/lib/api';
-import { updateActiveAvatar } from '@/lib/session';
-import ThemeToggle from '@/components/ThemeToggle';
+import { apiGet } from '@/lib/api';
 
 /**
  * ChatHub — the authenticated dashboard shell. Composes:
@@ -44,8 +42,6 @@ export default function ChatHub() {
   const [activeChat, setActiveChat] = useState(null);
   const [logoutOpen, setLogoutOpen] = useState(false);
   const [statusFlash, setStatusFlash] = useState('');
-  const [avatarUrl, setAvatarUrl] = useState(() => session.session?.user?.avatarUrl ?? '');
-  const [avatarUploading, setAvatarUploading] = useState(false);
 
   useEffect(() => {
     if (statusFlash) {
@@ -66,7 +62,7 @@ export default function ChatHub() {
         setThreads(
           (data.conversations || []).map((conversation) => ({
             id: conversation.id,
-            name: conversation.partner?.name || 'Chat',
+            name: conversation.partner?.displayName || conversation.partner?.name || 'Chat',
             avatar: conversation.partner?.avatarUrl || '',
             online: false,
             message: '',
@@ -130,28 +126,12 @@ export default function ChatHub() {
     router.push('/');
   }
 
-  async function handleAvatarUpload(dataUrl) {
-    setAvatarUploading(true);
-    try {
-      const data = await apiPost('/api/users/me/avatar', { avatarUrl: dataUrl });
-      updateActiveAvatar(data.user);
-      setAvatarUrl(data.user.avatarUrl || '');
-      setStatusFlash('Profile picture updated.');
-    } catch (err) {
-      setStatusFlash(err.message || 'Could not update your profile picture.');
-    } finally {
-      setAvatarUploading(false);
-    }
-  }
-
   if (!session.session) return null;
 
   return (
     <div className="flex h-screen overflow-hidden">
       <Sidebar
-        user={{ ...session.session.user, avatarUrl: avatarUrl || session.session.user.avatarUrl }}
-        avatarUploading={avatarUploading}
-        onAvatarUpload={handleAvatarUpload}
+        user={session.session.user}
         onLogout={() => setLogoutOpen(true)}
         activeTab="chats"
         setActiveTab={() => {}}
@@ -182,12 +162,11 @@ export default function ChatHub() {
           <p className="text-xs text-gray-500 dark:text-gray-400">
             Signed in as{' '}
             <span className="font-semibold text-gray-800 dark:text-gray-100">
-              {session.session.user.name}
+              {session.session.user.displayName}
             </span>
           </p>
           <div className="flex items-center gap-3">
             <ProfileProgressTracker progress={progress} />
-            <ThemeToggle />
           </div>
         </div>
 
@@ -221,7 +200,7 @@ export default function ChatHub() {
           <LogoutModal
             open={logoutOpen}
             avatarUrl={session.session.user.avatarUrl}
-            displayName={session.session.user.name}
+            displayName={session.session.user.displayName}
             username={session.session.user.username}
             busy={session.busy}
             onClose={() => setLogoutOpen(false)}

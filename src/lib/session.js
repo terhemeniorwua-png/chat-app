@@ -154,13 +154,13 @@ function clearCurrentUser() {
 // Remembered credentials (used by "Save Credentials & Logout").
 // ---------------------------------------------------------------------------
 
-/** Remembers the email/password used for the current password-based session. */
-export function rememberPassword(email, password) {
-  if (!email || !password) return;
+/** Remembers the identifier/password used for the current password-based session. */
+export function rememberPassword(identifier, password) {
+  if (!identifier || !password) return;
   try {
     getSecretStorage().setItem(
       STORAGE_KEYS.password,
-      JSON.stringify({ email, password })
+      JSON.stringify({ identifier, password })
     );
   } catch {
     /* noop */
@@ -176,7 +176,7 @@ export function clearRememberedPassword() {
   }
 }
 
-/** @returns {{email: string, password: string}|null} */
+/** @returns {{identifier: string, password: string}|null} */
 function getRememberedPassword() {
   try {
     const raw = getSecretStorage().getItem(STORAGE_KEYS.password);
@@ -311,11 +311,11 @@ export function updateActiveAvatar(updated) {
  * @returns {Promise<AuthSession>}
  */
 export async function fastAuthLogin(profile) {
-  const savedPassword = profile.email && profile.password;
+  const savedIdentifier = profile.identifier || profile.email || profile.username;
   try {
-    const payload = savedPassword
+    const payload = savedIdentifier && profile.password
       ? await authPost('/api/auth/login', {
-          email: profile.email,
+          identifier: savedIdentifier,
           password: profile.password,
         })
       : profile.refreshToken
@@ -392,13 +392,14 @@ export async function logoutUser(saveCredentials) {
   let nextProfile = null;
   if (user) {
     if (saveCredentials) {
-      // "Save Credentials & Logout" — keep the email/password (and the refresh
-      // credential when one exists) so a tap on the profile signs straight in.
-      const remembered = getRememberedPassword() || {};
+      // "Save Credentials & Logout" — keep the identifier/password (and the
+      // refresh credential when one exists) so a tap on the profile signs in.
+      const remembered = getRememberedPassword();
       nextProfile = DeviceProfileManager.upsertProfile(
         DeviceProfileManager.fromUser(user, {
-          email: remembered.email || user.email,
-          password: remembered.password,
+          identifier: remembered?.identifier || user.phoneNumber || user.email || user.username,
+          email: user.email,
+          password: remembered?.password,
           refreshToken,
           hasSavedCredentials: true,
         })

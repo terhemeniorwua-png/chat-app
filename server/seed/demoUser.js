@@ -9,9 +9,10 @@ const BCRYPT_ROUNDS = 10;
  * system; all other accounts are real sign-ups from the UI.
  */
 const DEMO_USER = {
+  phoneNumber: '+1234567890',
   username: 'demouser',
   password: 'Demo1234!',
-  name: 'Demo User',
+  displayName: 'Demo User',
   email: 'demo@luna.chat',
 };
 
@@ -24,8 +25,15 @@ export async function ensureDemoUser() {
   const existing = await User.findOne({ username: DEMO_USER.username });
   if (existing) return existing;
 
-  // If someone already registered with the demo email, link the username to
-  // that account instead of creating a duplicate.
+  const phoneMatch = await User.findOne({ phoneNumber: DEMO_USER.phoneNumber });
+  if (phoneMatch) {
+    if (!phoneMatch.username) {
+      phoneMatch.username = DEMO_USER.username;
+      await phoneMatch.save();
+    }
+    return phoneMatch;
+  }
+
   const emailMatch = await User.findOne({ email: DEMO_USER.email });
   if (emailMatch) {
     if (!emailMatch.username) {
@@ -37,7 +45,8 @@ export async function ensureDemoUser() {
 
   const hashedPassword = await bcrypt.hash(DEMO_USER.password, BCRYPT_ROUNDS);
   return User.create({
-    name: DEMO_USER.name,
+    displayName: DEMO_USER.displayName,
+    phoneNumber: DEMO_USER.phoneNumber,
     email: DEMO_USER.email,
     password: hashedPassword,
     username: DEMO_USER.username,

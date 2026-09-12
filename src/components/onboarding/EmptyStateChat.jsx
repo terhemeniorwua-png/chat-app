@@ -195,7 +195,7 @@ export default function EmptyStateChat({ user, onAddByUsername }) {
                     >
                       <img src={u.avatarUrl || ''} alt="" className="h-7 w-7 rounded-full object-cover" />
                       <span className="min-w-0">
-                        <span className="block truncate text-sm font-medium text-gray-900">{u.name}</span>
+                        <span className="block truncate text-sm font-medium text-gray-900">{u.displayName}</span>
                         <span className="block truncate text-xs text-gray-400">@{u.username}</span>
                       </span>
                     </button>

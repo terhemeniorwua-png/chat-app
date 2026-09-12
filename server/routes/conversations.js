@@ -27,7 +27,8 @@ function serializeConversation(doc, myId) {
     id: String(doc._id),
     partner: {
       id: partner ? String(partner._id.toString()) : '',
-      name: partner?.name || '',
+      displayName: partner?.displayName ?? partner?.name ?? '',
+      name: partner?.displayName ?? partner?.name ?? '',
       username: partner?.username || '',
       avatarUrl: partner?.avatarUrl || '',
     },
@@ -43,7 +44,7 @@ router.get('/', async (req, res, next) => {
     const conversations = await Conversation.find({
       participants: req.user._id,
     })
-      .populate('participants', 'name username avatarUrl')
+      .populate('participants', 'displayName username avatarUrl')
       .sort({ updatedAt: -1 })
       .limit(200)
       .lean();
@@ -80,7 +81,7 @@ router.post('/', async (req, res, next) => {
 
     const populated = await Conversation.findById(conversation._id).populate(
       'participants',
-      'name username avatarUrl'
+      'displayName username avatarUrl'
     );
 
     return res.status(201).json({

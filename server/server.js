@@ -89,7 +89,7 @@ app.use((err, req, res, next) => {
   if (err?.code === 11000) {
     return res
       .status(409)
-      .json({ message: 'An account with this email already exists.' });
+      .json({ message: 'An account with this phone number or username already exists.' });
   }
 
   res.status(err.status || 500).json({ message: 'Something went wrong on the server.' });
@@ -101,9 +101,10 @@ app.use((err, req, res, next) => {
 // call app.listen() outside of Vercel's serverless runtime.
 if (!process.env.VERCEL) {
   const PORT = process.env.PORT || 5000;
-  app.listen(PORT, () => {
-    console.log(`[luna] API listening on http://localhost:${PORT}`);
-  });
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`API listening on http://localhost:${PORT}`);
+});
+
 }
 
 export default app;

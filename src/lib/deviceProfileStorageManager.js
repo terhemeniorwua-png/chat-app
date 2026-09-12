@@ -32,7 +32,9 @@ function sanitize(profile) {
     displayName: profile.displayName || 'Unknown user',
     avatarUrl: profile.avatarUrl || '',
     hasSavedCredentials: Boolean(profile.hasSavedCredentials),
+    identifier: profile.identifier || '',
     email: profile.email || profile.userId || '',
+    phoneNumber: profile.phoneNumber || '',
     password: profile.password,
     refreshToken: profile.refreshToken,
     credentialsInvalid: Boolean(profile.credentialsInvalid),
@@ -80,6 +82,7 @@ export const DeviceProfileStorageManager = {
     return this.upsertProfile(
       this.fromUser(user, {
         hasSavedCredentials: true,
+        identifier: credentials.identifier || user.phoneNumber || user.email || user.username,
         email: credentials.email || user.email,
         password: credentials.password,
         refreshToken: credentials.refreshToken,
@@ -130,11 +133,13 @@ export const DeviceProfileStorageManager = {
   fromUser(user, options = {}) {
     return sanitize({
       userId: user.id,
-      username: user.username || (user.email || '').split('@')[0] || user.id,
-      displayName: user.name || user.email || user.id,
+      username: user.username || user.id,
+      displayName: user.displayName || user.name || user.email || user.id,
       avatarUrl: user.avatarUrl || '',
       hasSavedCredentials: Boolean(options.hasSavedCredentials),
-      email: options.email || user.email || '',
+      identifier: options.identifier || user.phoneNumber || user.email || user.username || '',
+      email: user.email || options.email || '',
+      phoneNumber: user.phoneNumber || '',
       password: options.password,
       refreshToken: options.refreshToken,
       lastLoggedInAt: Date.now(),

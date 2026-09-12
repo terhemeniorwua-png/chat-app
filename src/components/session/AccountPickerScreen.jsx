@@ -3,7 +3,6 @@
 import { motion } from 'framer-motion';
 import { UserPlus, AlertTriangle, Zap, X } from 'lucide-react';
 import BrandMark from '@/components/BrandMark';
-import ThemeToggle from '@/components/ThemeToggle';
 
 /**
  * Login view rendering saved local profiles from localStorage.
@@ -153,11 +152,6 @@ export default function AccountPickerScreen({
             By continuing you agree to Luna&apos;s terms &amp; privacy policy.
           </p>
         </motion.div>
-      </div>
-
-      {/* Theme toggle, visible on the account picker */}
-      <div className="absolute top-5 right-5">
-        <ThemeToggle />
       </div>
     </main>
   );

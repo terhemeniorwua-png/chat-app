@@ -6,10 +6,10 @@ import { Eye, EyeOff, Lock } from 'lucide-react';
 
 export function inputClass(hasError) {
   return [
-    'w-full rounded-xl border bg-gray-800/70 py-2.5 pl-10 pr-10 text-sm text-gray-100 placeholder-gray-500 outline-none transition focus:ring-2',
+    'w-full rounded-xl border bg-white py-2.5 pl-10 pr-10 text-sm text-gray-900 placeholder-gray-400 outline-none transition focus:ring-2',
     hasError
       ? 'border-[#EF4444]/70 focus:border-[#EF4444] focus:ring-[#EF4444]/30'
-      : 'border-gray-700/80 focus:border-[#7C3AED] focus:ring-[#7C3AED]/40',
+      : 'border-gray-300 focus:border-[#7C3AED] focus:ring-[#7C3AED]/40',
   ].join(' ');
 }
 
@@ -70,7 +70,7 @@ export function PasswordInput({
           type="button"
           aria-label={show ? 'Hide password' : 'Show password'}
           onClick={() => setShow((prev) => !prev)}
-          className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 transition hover:text-gray-200"
+          className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 transition hover:text-gray-700"
         >
           {show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
         </button>
