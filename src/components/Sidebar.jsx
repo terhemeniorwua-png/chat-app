@@ -1,6 +1,7 @@
 'use client';
 import { useRouter } from 'next/navigation';
 import {
+  Home,
   MessageSquare,
   Phone,
   Users,
@@ -27,6 +28,7 @@ import {
 export default function Sidebar({ activeTab, setActiveTab, user, onLogout }) {
   const router = useRouter();
   const navItems = [
+    { id: 'home', label: 'Home', icon: Home, href: '/home' },
     { id: 'chats', label: 'Chats', icon: MessageSquare },
     { id: 'calls', label: 'Calls', icon: Phone },
     { id: 'contacts', label: 'Contacts', icon: Users, href: '/social' },

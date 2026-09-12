@@ -35,6 +35,10 @@ yarn-error.log*
 !.env.example
 !.env.local.example
 
+# production env must never be committed (secrets live in the host's panel)
+.env.production
+.env.local.production
+
 # vercel
 .vercel
 

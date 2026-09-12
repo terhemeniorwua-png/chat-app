@@ -10,6 +10,7 @@
     "lint": "eslint",
     "server": "node server/server.js",
     "server:dev": "node --watch server/server.js",
+    "start:server": "node server/server.js",
     "dev:all": "node --watch server/server.js & next dev"
   },
   "dependencies": {
@@ -26,7 +27,8 @@
     "next": "16.3.3",
     "react": "19.2.8",
     "react-dom": "19.2.8",
-    "socket.io": "^4.8.3"
+    "socket.io": "^4.8.3",
+    "socket.io-client": "^4.8.3"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

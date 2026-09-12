@@ -1,36 +1,40 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://github.com/vercel/next.js/tree/canary/packages/create-next-app).
+# Luna
 
-## Getting Started
+Luna is a realtime chat app. The Next.js frontend (`src/`) talks to an Express +
+Socket.IO backend (`server/`) over a REST API, with realtime DMs and a news feed.
 
-First, run the development server:
-
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+```
+Next.js (localhost:3000)  →  Express + Socket.IO (localhost:5000)  →  MongoDB
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Local development
 
-You can start editing the page by modifying `app/page.js`. The page auto-updates as you edit the file.
+Two processes, in two terminals (or one with `pnpm dev:all`):
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+# Terminal 1 — backend (Express + Socket.IO + MongoDB)
+pnpm server:dev
+# or: node server/server.js
 
-## Learn More
+# Terminal 2 — frontend
+pnpm dev
+```
 
-To learn more about Next.js, take a look at the following resources:
+- Frontend: http://localhost:3000
+- Backend API + Socket.IO: http://localhost:5000
+- Health check: http://localhost:5000/api/health
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+Copy `.env.example` → `.env` (backend) and `.env.local.example` → `.env.local`
+(frontend) and fill in real values. Local MongoDB works via
+`MONGODB_URI=mongodb://127.0.0.1:27017/luna`.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Production deployment
 
-## Deploy on Vercel
+See [DEPLOYMENT.md](./DEPLOYMENT.md) for the full guide:
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+- Next.js → **Vercel**
+- Express + Socket.IO → a **persistent** host (Render / Railway / Fly.io)
+- MongoDB → **Atlas**
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+The two environment variables that wire the frontend to the backend are
+`NEXT_PUBLIC_API_URL` (REST) and `NEXT_PUBLIC_SOCKET_URL` (realtime).
