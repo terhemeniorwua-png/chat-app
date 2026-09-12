@@ -3,6 +3,7 @@ import { Types } from 'mongoose';
 import requireAuth from '../middleware/auth.js';
 import User from '../models/User.js';
 import FriendRequest from '../models/FriendRequest.js';
+import Conversation from '../models/Conversation.js';
 
 const router = Router();
 
@@ -26,8 +27,8 @@ function publicProfile(doc) {
 }
 
 // GET /api/friends/suggestions
-// Everyone except: the current user, existing friends, users involved in a
-// pending request (ours or theirs), and users we've ignored.
+// Everyone on the platform EXCEPT: the current user, accepted friends,
+// pending requests (incoming OR outgoing), and users we've chosen to ignore.
 router.get('/suggestions', async (req, res, next) => {
   try {
     const excludeIds = new Set([req.user._id.toString()]);
@@ -39,14 +40,16 @@ router.get('/suggestions', async (req, res, next) => {
       excludeIds.add(id.toString());
     }
 
-    // Everyone tied to a *pending* request is filtered out, so we only need
-    // to look at requests with status 'pending'.
-    const pendingRequests = await FriendRequest.find({
-      status: 'pending',
-      $or: [{ sender: req.user._id }, { recipient: req.user._id }],
+    // Pending conversations are handled in the Requests hub (incoming accept /
+    // outgoing cancel), so they must not clog the suggestions feed.
+    const pending = await FriendRequest.find({
+      $or: [
+        { sender: req.user._id, status: 'pending' },
+        { recipient: req.user._id, status: 'pending' },
+      ],
     }).select('sender recipient');
 
-    for (const request of pendingRequests) {
+    for (const request of pending) {
       excludeIds.add(request.sender.toString());
       excludeIds.add(request.recipient.toString());
     }
@@ -145,6 +148,55 @@ router.get('/requests/pending', async (req, res, next) => {
   }
 });
 
+// GET /api/friends/requests/outgoing
+// Requests this user sent that are still awaiting a decision.
+router.get('/requests/outgoing', async (req, res, next) => {
+  try {
+    const requests = await FriendRequest.find({
+      sender: req.user._id,
+      status: 'pending',
+    })
+      .populate('recipient', 'name email avatarUrl')
+      .sort({ createdAt: -1 })
+      .limit(100);
+
+    return res.json({
+      requests: requests.map((request) => ({
+        id: request._id.toString(),
+        recipient: publicProfile(request.recipient),
+        createdAt: request.createdAt,
+      })),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/friends/request/cancel { recipientId }
+router.post('/request/cancel', async (req, res, next) => {
+  try {
+    const { recipientId } = req.body || {};
+
+    if (!isObjectId(recipientId)) {
+      return res.status(400).json({ message: 'Invalid recipient.' });
+    }
+
+    const deleted = await FriendRequest.findOneAndDelete({
+      sender: req.user._id,
+      recipient: recipientId,
+      status: 'pending',
+    });
+
+    if (!deleted) {
+      return res.status(404).json({ message: 'No pending request to cancel.' });
+    }
+
+    return res.json({ message: 'Friend request cancelled.' });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // POST /api/friends/request/accept { requestId }
 router.post('/request/accept', async (req, res, next) => {
   try {
@@ -170,6 +222,10 @@ router.post('/request/accept', async (req, res, next) => {
 
     request.status = 'accepted';
     await request.save();
+
+    // Acceptance turns the pair into a real 1-on-1 conversation so the chat
+    // list can pick it up immediately — no separate "open thread" step.
+    await Conversation.findOrCreateWith(req.user._id, senderId);
 
     return res.json({ message: 'Friend request accepted.', friendId: senderId.toString() });
   } catch (err) {

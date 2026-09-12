@@ -4,7 +4,7 @@ import { Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import dynamic from 'next/dynamic';
 
-const AuthGateway = dynamic(() => import('@/components/AuthGateway'), {
+const AuthContainer = dynamic(() => import('@/components/AuthContainer'), {
   ssr: false,
 });
 
@@ -16,7 +16,7 @@ function AuthContent() {
       ? 'Your password has been reset. Sign in with your new password.'
       : '';
 
-  return <AuthGateway initialCreate={initialCreate} initialNotice={notice} />;
+  return <AuthContainer initialCreate={initialCreate} initialNotice={notice} />;
 }
 
 export default function AuthPage() {

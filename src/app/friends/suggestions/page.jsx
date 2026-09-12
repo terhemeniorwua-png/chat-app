@@ -15,6 +15,7 @@ export default function SuggestionsPage() {
   const [error, setError] = useState(null);
   const [pendingId, setPendingId] = useState(null);
   const [sentIds, setSentIds] = useState([]);
+  const [cancellingId, setCancellingId] = useState(null);
 
   useEffect(() => {
     if (!getToken()) {
@@ -57,6 +58,20 @@ export default function SuggestionsPage() {
       }
     } finally {
       setPendingId(null);
+    }
+  };
+
+  const handleCancel = async (user) => {
+    setCancellingId(user.id);
+    try {
+      await apiPost('/api/friends/request/cancel', { recipientId: user.id });
+      setSentIds((prev) => prev.filter((id) => id !== user.id));
+    } catch (err) {
+      if (err.message !== 'Session expired. Please sign in again.') {
+        setError(err.message);
+      }
+    } finally {
+      setCancellingId(null);
     }
   };
 
@@ -117,12 +132,15 @@ export default function SuggestionsPage() {
                 status={
                   pendingId === user.id
                     ? 'sending'
+                    : cancellingId === user.id
+                    ? 'cancelling'
                     : sentIds.includes(user.id)
                     ? 'sent'
                     : 'idle'
                 }
                 onAdd={() => handleAdd(user)}
                 onIgnore={() => handleIgnore(user)}
+                onCancel={() => handleCancel(user)}
               />
             ))}
           </AnimatePresence>

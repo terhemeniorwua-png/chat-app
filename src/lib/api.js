@@ -1,32 +1,39 @@
-const API_URL =
-  process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
-const TOKEN_KEY = 'luna_token';
-const USER_KEY = 'luna_user';
+/**
+ * Thin fetch wrapper for the Luna API. Token lifecycle now lives in
+ * `@/lib/session` (access token + refresh rotation); this module only wires a
+ * 401 → refresh → retry loop on top of it.
+ */
+
+import {
+  getAccessToken,
+  getCurrentUser as getActiveUser,
+  purgeSession,
+  refreshAccessToken,
+} from '@/lib/session';
+import { AUTH_EVENTS } from '@/lib/constants';
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
 
 export function getToken() {
-  if (typeof window === 'undefined') return null;
-  return window.localStorage.getItem(TOKEN_KEY);
+  return getAccessToken();
 }
 
 export function getCurrentUser() {
-  if (typeof window === 'undefined') return null;
-  try {
-    const raw = window.localStorage.getItem(USER_KEY);
-    return raw ? JSON.parse(raw) : null;
-  } catch {
-    return null;
-  }
+  return getActiveUser();
 }
 
 export function clearSession() {
-  if (typeof window === 'undefined') return;
-  window.localStorage.removeItem(TOKEN_KEY);
-  window.localStorage.removeItem(USER_KEY);
+  purgeSession();
 }
 
-async function request(method, path, body) {
-  const token = getToken();
+class UnauthorizedError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'UnauthorizedError';
+  }
+}
 
+async function perform(method, path, body, token) {
   let res;
   try {
     res = await fetch(`${API_URL}${path}`, {
@@ -43,13 +50,8 @@ async function request(method, path, body) {
     );
   }
 
-  // An expired/invalid token ends the session and bounces to the auth screen.
   if (res.status === 401 && token) {
-    clearSession();
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('luna:unauthorized'));
-    }
-    throw new Error('Session expired. Please sign in again.');
+    throw new UnauthorizedError('Session expired. Please sign in again.');
   }
 
   const data = await res.json().catch(() => ({}));
@@ -61,5 +63,31 @@ async function request(method, path, body) {
   return data;
 }
 
+async function request(method, path, body) {
+  let token = getToken();
+
+  try {
+    return await perform(method, path, body, token);
+  } catch (err) {
+    // One honest attempt at rotating the access token, then retry the call.
+    if (err instanceof UnauthorizedError && token) {
+      try {
+        await refreshAccessToken();
+      } catch {
+        purgeSession();
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent(AUTH_EVENTS.unauthorized));
+        }
+        throw new Error('Session expired. Please sign in again.');
+      }
+      token = getToken();
+      return perform(method, path, body, token);
+    }
+    throw err;
+  }
+}
+
 export const apiGet = (path) => request('GET', path);
 export const apiPost = (path, body) => request('POST', path, body);
+export const apiPatch = (path, body) => request('PATCH', path, body);
+export const apiDelete = (path) => request('DELETE', path);

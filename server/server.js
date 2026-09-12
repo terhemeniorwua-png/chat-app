@@ -4,6 +4,9 @@ import cors from 'cors';
 import mongoose from 'mongoose';
 import authRoutes from './routes/auth.js';
 import friendsRoutes from './routes/friends.js';
+import usersRoutes from './routes/users.js';
+import conversationsRoutes from './routes/conversations.js';
+import { ensureDemoUser } from './seed/demoUser.js';
 
 const app = express();
 
@@ -30,6 +33,11 @@ function connectToDatabase() {
       .connect(MONGODB_URI)
       .then((m) => {
         console.log('[luna] connected to MongoDB');
+        // Exactly one hardcoded account exists in the whole system: the demo
+        // user, created on boot so suggestion/search always have a test target.
+        ensureDemoUser()
+          .then(() => console.log('[luna] demo user ready (demouser / Demo1234!)'))
+          .catch((err) => console.error(`[luna] demo user seed failed: ${err.message}`));
         return m;
       })
       .catch((err) => {
@@ -65,6 +73,8 @@ app.get('/api/health', (req, res) => {
 
 app.use('/api/auth', authRoutes);
 app.use('/api/friends', friendsRoutes);
+app.use('/api/users', usersRoutes);
+app.use('/api/conversations', conversationsRoutes);
 
 // 404 for unknown API routes
 app.use((req, res) => {

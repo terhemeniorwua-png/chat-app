@@ -1,5 +1,40 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
 @theme {
   --font-sans: var(--font-poppins), ui-sans-serif, system-ui, sans-serif;
+}
+
+/*
+ * Semantic theme tokens. Light values are the :root default; the `.dark`
+ * class (toggled by ThemeProvider on <html>) swaps them. Components reference
+ * these with `bg-[var(--luna-surface)]` etc. so every surface — auth cards,
+ * modals, chat bubbles, profile cards, nav — follows the active theme.
+ */
+:root {
+  --luna-bg: #ffffff;
+  --luna-surface: #ffffff;
+  --luna-surface-2: #f9fafb;
+  --luna-surface-3: #f3f4f6;
+  --luna-border: #e5e7eb;
+  --luna-text: #111827;
+  --luna-muted: #6b7280;
+  --luna-nav: #1f2937;
+}
+
+.dark {
+  --luna-bg: #111827;
+  --luna-surface: #1f2937;
+  --luna-surface-2: #374151;
+  --luna-surface-3: #4b5563;
+  --luna-border: #374151;
+  --luna-text: #f9fafb;
+  --luna-muted: #9ca3af;
+  --luna-nav: #0b1220;
+}
+
+body {
+  background-color: var(--luna-bg);
+  color: var(--luna-text);
 }

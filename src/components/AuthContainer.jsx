@@ -3,15 +3,23 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
-import { ArrowRight, Mail, Loader2, User } from 'lucide-react';
+import { ArrowRight, Mail, Loader2, User, X, Zap } from 'lucide-react';
 import { GoogleLogin, GoogleOAuthProvider } from '@react-oauth/google';
 import BrandMark from '@/components/BrandMark';
+import ThemeToggle from '@/components/ThemeToggle';
 import { FieldError, inputClass, PasswordInput } from '@/components/fields';
 import {
   validateEmail,
   validateFullName,
   validatePassword,
 } from '@/lib/validation';
+import {
+  persistAuthSession,
+  clearRememberedPassword,
+  rememberPassword,
+} from '@/lib/session';
+import { useSession } from '@/hooks/useSession';
+import { useDeviceProfiles } from '@/hooks/useDeviceProfiles';
 
 const TABS = {
   SIGN_IN: 'sign-in',
@@ -20,10 +28,6 @@ const TABS = {
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
 const GOOGLE_CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || '';
-
-// Session keys persisted on the client once authentication succeeds.
-const TOKEN_KEY = 'luna_token';
-const USER_KEY = 'luna_user';
 
 const tabVariants = {
   hidden: (tab) => ({
@@ -61,11 +65,6 @@ async function apiPost(path, payload) {
   return data;
 }
 
-function persistSession(token, user) {
-  localStorage.setItem(TOKEN_KEY, token);
-  localStorage.setItem(USER_KEY, JSON.stringify(user));
-}
-
 function GoogleIcon({ className = '' }) {
   return (
     <svg viewBox="0 0 24 24" className={className} aria-hidden="true">
@@ -89,33 +88,53 @@ function GoogleIcon({ className = '' }) {
   );
 }
 
+function AppleIcon({ className = '' }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
+      <path d="M16.365 1.43c0 1.14-.42 2.2-1.24 3.03-.92.92-2.09 1.45-3.08 1.36-.06-.99.38-2.08 1.19-2.9.77-.83 2.02-1.45 3.13-1.49Zm3.72 14.12c.3.75.5 1.46.72 2.23.31.95.5 1.87.51 2.03 0 .06-.06.1-.16.07a7.6 7.6 0 0 1-2.92-1.9c-.63-.72-1.16-1.4-1.6-1.9-.76.8-1.55 1.2-2.62 1.26-.94.06-1.96-.24-2.9-.83-1.6-.99-2.88-2.6-3.73-4.63-.87-2.1-1.2-4.14-.92-6.06.28-1.93 1.19-3.52 2.75-4.63.98-.71 2.06-1.06 3.26-1.02 1.11.04 2.1.32 2.96.93.42-.18.86-.4 1.31-.52.5-.13 1.05-.18 1.63-.13.48.04.9.13 1.28.27-.2.47-.4.89-.62 1.28-.38.66-.9 1.27-1.57 1.76-1.2.87-1.8 1.96-1.84 3.32-.05 1.9 1.18 3.4 3.1 4.14.44.18.9.3 1.27.37.22.04.42.06.64.04Z" />
+    </svg>
+  );
+}
+
 /**
- * Full panel for /auth and the post-splash screen. Sends credentials to the
- * Luna API (Express + MongoDB):
- *   - POST /api/auth/signup           -> new users, route to /onboarding
- *   - POST /api/auth/login            -> returning users, route to /dashboard
- *   - POST /api/auth/google           -> Google OAuth (verified credential)
+ * AuthContainer — the primary authentication surface. Strictly two tabs:
+ * "Sign In" and "Create Account" (no OTP). Alongside the form it renders the
+ * Saved Profiles list so a saved account can tap-to-login — or, when only
+ * metadata was kept ("Logout Only"), route to a password re-auth prompt.
  *
- * On success the returned JWT + user object are persisted in
- * `luna_token` / `luna_user`. Backend field errors render under the inputs.
+ *   - POST /api/auth/signup        -> new users, route to /onboarding
+ *   - POST /api/auth/login         -> returning users (email OR username)
+ *   - POST /api/auth/google        -> Google OAuth (verified credential)
  *
  * @param {object} props
- * @param {boolean} [props.initialCreate=false] - start with the Create Account tab.
- * @param {string} [props.initialNotice=''] - optional success banner (e.g. after a password reset).
+ * @param {boolean} [props.initialCreate=false]
+ * @param {string} [props.initialNotice='']
+ * @param {string} [props.initialIdentifier='']
+ * @param {import('@/lib/constants').StoredProfile|null} [props.contextProfile=null]
  */
-export default function AuthGateway({ initialCreate = false, initialNotice = '' }) {
-  const [tab, setTab] = useState(initialCreate ? TABS.CREATE_ACCOUNT : TABS.SIGN_IN);
+export default function AuthContainer({
+  initialCreate = false,
+  initialNotice = '',
+  initialIdentifier = '',
+  contextProfile = null,
+}) {
+  const [tab, setTab] = useState(
+    initialCreate ? TABS.CREATE_ACCOUNT : TABS.SIGN_IN
+  );
   const [loading, setLoading] = useState(false);
   const [authError, setAuthError] = useState('');
   const [notice, setNotice] = useState(initialNotice || '');
   const [values, setValues] = useState({
     fullName: '',
-    email: '',
+    email: initialIdentifier || '',
     password: '',
     confirmPassword: '',
   });
   const [fieldErrors, setFieldErrors] = useState({});
+  const [fastAuthBusy, setFastAuthBusy] = useState(null);
   const router = useRouter();
+  const session = useSession();
+  const { profiles, remove } = useDeviceProfiles();
 
   const isSignIn = tab === TABS.SIGN_IN;
 
@@ -138,11 +157,16 @@ export default function AuthGateway({ initialCreate = false, initialNotice = '' 
     setAuthError('');
     setLoading(true);
 
-    const email = values.email.trim();
+    const identifier = values.email.trim();
     const errors = {};
 
-    const emailError = validateEmail(email);
-    if (emailError) errors.email = emailError;
+    let identifierError = null;
+    if (identifier.includes('@')) {
+      identifierError = validateEmail(identifier);
+    } else if (identifier.length < 3) {
+      identifierError = 'Enter your email or username (at least 3 characters).';
+    }
+    if (identifierError) errors.email = identifierError;
     const passwordError = validatePassword(values.password);
     if (passwordError) errors.password = passwordError;
 
@@ -153,9 +177,14 @@ export default function AuthGateway({ initialCreate = false, initialNotice = '' 
     }
 
     try {
-      const data = await apiPost('/api/auth/login', { email, password: values.password });
-      persistSession(data.token, data.user);
-      router.push('/dashboard');
+      const data = await apiPost('/api/auth/login', {
+        identifier,
+        password: values.password,
+      });
+      // Remember email+password so a later "Save Credentials & Logout" can keep
+      // them on this device for one-tap sign-in.
+      rememberPassword(data.user.email, values.password);
+      completeAuth(data);
     } catch (err) {
       setFieldErrors(err.fieldErrors || {});
       setAuthError(err.message || 'Something went wrong. Please try again.');
@@ -199,8 +228,8 @@ export default function AuthGateway({ initialCreate = false, initialNotice = '' 
         email,
         password: values.password,
       });
-      persistSession(data.token, data.user);
-      router.push('/onboarding?isNewUser=true');
+      rememberPassword(data.user.email, values.password);
+      completeAuth(data);
     } catch (err) {
       setFieldErrors(err.fieldErrors || {});
       setAuthError(err.message || 'Something went wrong. Please try again.');
@@ -214,13 +243,23 @@ export default function AuthGateway({ initialCreate = false, initialNotice = '' 
 
     try {
       const data = await apiPost('/api/auth/google', { credential });
-      persistSession(data.token, data.user);
-      router.push('/dashboard');
+      clearRememberedPassword();
+      completeAuth(data);
     } catch (err) {
       setFieldErrors(err.fieldErrors || {});
       setAuthError(err.message || 'Google sign-in failed.');
       setLoading(false);
     }
+  }
+
+  function completeAuth(data) {
+    persistAuthSession({
+      user: data.user,
+      token: data.token,
+      refreshToken: data.refreshToken,
+      isNewUser: data.isNewUser,
+    });
+    router.push(data.isNewUser ? '/onboarding?isNewUser=true' : '/dashboard');
   }
 
   function handleSubmit(e) {
@@ -230,8 +269,35 @@ export default function AuthGateway({ initialCreate = false, initialNotice = '' 
     return handleSignup(e);
   }
 
+  const canFastAuth = (profile) =>
+    profile.hasSavedCredentials && !profile.credentialsInvalid;
+
+  async function handleSavedProfileTap(profile) {
+    if (!canFastAuth(profile)) {
+      // "Logout Only" card: keep the profile visible but require a password.
+      setValues((prev) => ({ ...prev, email: profile.username || profile.email }));
+      setTab(TABS.SIGN_IN);
+      setFieldErrors({});
+      setAuthError('');
+      return;
+    }
+    setFastAuthBusy(profile.userId);
+    try {
+      await session.fastAuth(profile);
+      router.replace('/dashboard');
+    } catch (err) {
+      setAuthError(err.message || 'One-tap sign-in failed. Enter your password to continue.');
+      setFastAuthBusy(null);
+    }
+  }
+
+  function handleForgetDevice(userId, e) {
+    e.stopPropagation();
+    remove(userId);
+  }
+
   const content = (
-    <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[#1F2937] px-4 py-12">
+    <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[var(--luna-bg)] px-4 py-12">
       {/* Ambient gradient backdrop */}
       <div
         aria-hidden="true"
@@ -253,20 +319,86 @@ export default function AuthGateway({ initialCreate = false, initialNotice = '' 
           initial={{ opacity: 0, y: 24 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5, ease: 'easeOut' }}
-          className="w-full rounded-3xl border border-white/10 bg-white/5 p-6 shadow-2xl backdrop-blur-xl sm:p-8"
+          className="w-full rounded-3xl border border-gray-200 bg-white p-6 shadow-2xl dark:border-white/10 dark:bg-white/5 sm:p-8"
         >
           {/* Mobile brand header */}
           <div className="mb-8 lg:hidden">
-            <h1 className="text-center text-3xl font-bold lowercase tracking-tight text-white">
+            <h1 className="text-center text-3xl font-bold lowercase tracking-tight text-gray-900 dark:text-white">
               luna
             </h1>
-            <p className="mt-1 text-center text-sm font-light tracking-wide text-gray-400">
+            <p className="mt-1 text-center text-sm font-light tracking-wide text-gray-500 dark:text-gray-400">
               a new light on conversation
             </p>
           </div>
 
-          {/* Tab switcher */}
-          <div className="relative mb-6 grid grid-cols-2 rounded-xl bg-gray-800/80 p-1">
+          {/* Saved profiles list (tap to login / forget device) */}
+          {profiles.length > 0 && (
+            <div className="mb-6">
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                Saved accounts
+              </p>
+              <ul className="flex gap-2 overflow-x-auto pb-1 no-scrollbar">
+                {profiles.map((profile) => {
+                  const busy = fastAuthBusy === profile.userId;
+                  const fast = canFastAuth(profile);
+                  return (
+                    <li key={profile.userId} className="shrink-0">
+                      <motion.button
+                        type="button"
+                        whileTap={{ scale: 0.97 }}
+                        disabled={busy}
+                        onClick={() => handleSavedProfileTap(profile)}
+                        className="group relative flex items-center gap-2 rounded-2xl border border-gray-200 bg-[var(--luna-surface-2)] py-1.5 pl-1.5 pr-3 text-left transition hover:border-[#7C3AED]/60 dark:border-white/10 dark:bg-gray-800/60 disabled:opacity-70"
+                      >
+                        {profile.avatarUrl ? (
+                          <img
+                            src={profile.avatarUrl}
+                            alt=""
+                            className="h-8 w-8 shrink-0 rounded-full object-cover"
+                          />
+                        ) : (
+                          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#7C3AED]/40 text-sm font-bold text-white">
+                            {profile.displayName.charAt(0).toUpperCase()}
+                          </div>
+                        )}
+                        <span className="min-w-0">
+                          <span className="block max-w-[7rem] truncate text-xs font-semibold text-gray-900 dark:text-white">
+                            {profile.displayName}
+                          </span>
+                          <span className="block text-[10px] text-gray-500 dark:text-gray-400">
+                            {fast ? (
+                              <span className="inline-flex items-center gap-0.5 text-[#7C3AED]">
+                                <Zap className="h-2.5 w-2.5" /> Tap to login
+                              </span>
+                            ) : (
+                              'Password required'
+                            )}
+                          </span>
+                        </span>
+                        <button
+                          type="button"
+                          aria-label={`Forget ${profile.displayName} on this device`}
+                          title="Forget this device"
+                          onClick={(e) => handleForgetDevice(profile.userId, e)}
+                          className="rounded-full p-1 text-gray-400 transition hover:bg-[#EF4444]/15 hover:text-[#F87171]"
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                        {busy && (
+                          <span className="absolute inset-0 flex items-center justify-center rounded-2xl bg-white/60 dark:bg-black/40">
+                            <Loader2 className="h-4 w-4 animate-spin text-[#7C3AED]" />
+                          </span>
+                        )}
+                      </motion.button>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          )}
+
+          {/* Tab switcher — Sign In / Create Account only */}
+          <div className="relative mb-6 grid grid-cols-2 rounded-xl bg-gray-100 p-1 dark:bg-gray-800/80">
             <motion.span
               aria-hidden="true"
               className="absolute inset-y-1 left-1 rounded-lg bg-[#7C3AED] shadow-lg shadow-[#7C3AED]/40"
@@ -277,7 +409,8 @@ export default function AuthGateway({ initialCreate = false, initialNotice = '' 
               transition={{ type: 'spring', stiffness: 320, damping: 30 }}
             />
             {[TABS.SIGN_IN, TABS.CREATE_ACCOUNT].map((value) => {
-              const label = value === TABS.SIGN_IN ? 'Sign In' : 'Create Account';
+              const label =
+                value === TABS.SIGN_IN ? 'Sign In' : 'Create Account';
               const active = tab === value;
               return (
                 <button
@@ -285,7 +418,9 @@ export default function AuthGateway({ initialCreate = false, initialNotice = '' 
                   type="button"
                   onClick={() => switchTab(value)}
                   className={`relative z-10 rounded-lg px-4 py-2.5 text-sm font-semibold transition-colors ${
-                    active ? 'text-white' : 'text-gray-400 hover:text-gray-200'
+                    active
+                      ? 'text-white'
+                      : 'text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200'
                   }`}
                 >
                   {label}
@@ -302,6 +437,30 @@ export default function AuthGateway({ initialCreate = false, initialNotice = '' 
             initial="hidden"
             animate="visible"
           >
+            {contextProfile && tab === TABS.SIGN_IN && (
+              <div className="mb-5 flex items-center gap-3 rounded-2xl border border-gray-200 bg-[var(--luna-surface-2)] p-3 dark:border-white/10 dark:bg-gray-800/60">
+                {contextProfile.avatarUrl ? (
+                  <img
+                    src={contextProfile.avatarUrl}
+                    alt=""
+                    className="h-10 w-10 rounded-full object-cover"
+                  />
+                ) : (
+                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#7C3AED]/40 font-bold text-white">
+                    {contextProfile.displayName.charAt(0).toUpperCase()}
+                  </div>
+                )}
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-semibold text-gray-900 dark:text-white">
+                    Signing in as {contextProfile.displayName}
+                  </p>
+                  <p className="truncate text-xs text-gray-500 dark:text-gray-400">
+                    @{contextProfile.username} · password required
+                  </p>
+                </div>
+              </div>
+            )}
+
             <form onSubmit={handleSubmit} className="space-y-4" noValidate>
               {notice && (
                 <motion.p
@@ -355,7 +514,7 @@ export default function AuthGateway({ initialCreate = false, initialNotice = '' 
                   <input
                     type="email"
                     name="email"
-                    placeholder="Email"
+                    placeholder="Email or username"
                     autoComplete="email"
                     value={values.email}
                     onChange={(e) => setValue('email', e.target.value)}
@@ -386,15 +545,7 @@ export default function AuthGateway({ initialCreate = false, initialNotice = '' 
               )}
 
               {isSignIn && (
-                <div className="flex items-center justify-between text-sm">
-                  <label className="flex cursor-pointer items-center gap-2 text-gray-300">
-                    <input
-                      type="checkbox"
-                      name="rememberMe"
-                      className="h-4 w-4 cursor-pointer accent-[#7C3AED]"
-                    />
-                    Remember me
-                  </label>
+                <div className="flex items-center justify-end text-sm">
                   <button
                     type="button"
                     onClick={() => router.push('/forgot-password')}
@@ -405,12 +556,11 @@ export default function AuthGateway({ initialCreate = false, initialNotice = '' 
                 </div>
               )}
 
-              {/* Primary CTA */}
               <motion.button
                 type="submit"
                 disabled={loading}
                 whileTap={{ scale: 0.98 }}
-                className="group relative flex w-full items-center justify-center gap-2 rounded-xl bg-[#7C3AED] px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-[#7C3AED]/40 transition hover:bg-[#6D28D9] hover:shadow-xl hover:shadow-[#7C3AED]/50 disabled:cursor-not-allowed disabled:opacity-70"
+                className="group relative flex w-full items-center justify-center gap-2 rounded-xl bg-[#7C3AED] px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-[#7C3AED]/40 transition hover:bg-[#6D28D9] disabled:cursor-not-allowed disabled:opacity-70"
               >
                 {loading ? (
                   <>
@@ -428,14 +578,13 @@ export default function AuthGateway({ initialCreate = false, initialNotice = '' 
 
             {/* Divider */}
             <div className="my-6 flex items-center gap-3">
-              <span className="h-px flex-1 bg-gray-700" />
-              <span className="text-xs font-medium uppercase tracking-wider text-gray-500">
+              <span className="h-px flex-1 bg-gray-200 dark:bg-gray-700" />
+              <span className="text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
                 or continue with
               </span>
-              <span className="h-px flex-1 bg-gray-700" />
+              <span className="h-px flex-1 bg-gray-200 dark:bg-gray-700" />
             </div>
 
-            {/* Google OAuth */}
             {GOOGLE_CLIENT_ID ? (
               <GoogleLogin
                 onSuccess={({ credential }) => {
@@ -455,7 +604,7 @@ export default function AuthGateway({ initialCreate = false, initialNotice = '' 
                     onClick={onClick}
                     disabled={loading}
                     whileTap={{ scale: 0.98 }}
-                    className="flex w-full items-center justify-center gap-2 rounded-xl border border-gray-700 bg-gray-800/60 px-4 py-2.5 text-sm font-medium text-gray-200 transition hover:border-gray-500 hover:bg-gray-700/60 disabled:cursor-not-allowed disabled:opacity-70"
+                    className="flex w-full items-center justify-center gap-2 rounded-xl border border-gray-200 bg-[var(--luna-surface-2)] px-4 py-2.5 text-sm font-medium text-gray-700 transition hover:border-[#7C3AED]/50 dark:border-gray-700 dark:bg-gray-800/60 dark:text-gray-200 disabled:cursor-not-allowed disabled:opacity-70"
                   >
                     <GoogleIcon className="h-4 w-4" />
                     Continue with Google
@@ -470,18 +619,35 @@ export default function AuthGateway({ initialCreate = false, initialNotice = '' 
                     'Google sign-in is not configured. Add NEXT_PUBLIC_GOOGLE_CLIENT_ID to .env.local.'
                   )
                 }
-                className="flex w-full items-center justify-center gap-2 rounded-xl border border-gray-700 bg-gray-800/60 px-4 py-2.5 text-sm font-medium text-gray-200 transition hover:border-gray-500 hover:bg-gray-700/60"
+                className="flex w-full items-center justify-center gap-2 rounded-xl border border-gray-200 bg-[var(--luna-surface-2)] px-4 py-2.5 text-sm font-medium text-gray-700 transition hover:border-[#7C3AED]/50 dark:border-gray-700 dark:bg-gray-800/60 dark:text-gray-200"
               >
                 <GoogleIcon className="h-4 w-4" />
                 Continue with Google
               </button>
             )}
+
+            {/* Apple Sign-In (coming soon) */}
+            <button
+              type="button"
+              onClick={() =>
+                setAuthError('Apple Sign-In is coming soon. Use email or Google for now.')
+              }
+              className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-gray-200 bg-[var(--luna-surface-2)] px-4 py-2.5 text-sm font-medium text-gray-700 transition hover:border-[#7C3AED]/50 dark:border-gray-700 dark:bg-gray-800/60 dark:text-gray-200"
+            >
+              <AppleIcon className="h-4 w-4" />
+              Continue with Apple
+            </button>
           </motion.div>
 
-          <p className="mt-6 text-center text-xs text-gray-500">
-            By continuing you agree to Luna&apos;s terms & privacy policy.
+          <p className="mt-6 text-center text-xs text-gray-500 dark:text-gray-400">
+            By continuing you agree to Luna&apos;s terms &amp; privacy policy.
           </p>
         </motion.div>
+      </div>
+
+      {/* Theme toggle, visible on the auth screen */}
+      <div className="absolute top-5 right-5">
+        <ThemeToggle />
       </div>
     </main>
   );
