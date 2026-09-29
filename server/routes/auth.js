@@ -17,7 +17,7 @@ const PASSWORD_RE =
   /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&_-])[A-Za-z\d@$!%*?&_-]{5,}$/;
 
 const BCRYPT_ROUNDS = 10;
-const REFRESH_TOKEN_EXPIRES = '30d';
+const REFRESH_TOKEN_EXPIRES = '90d';
 const REFRESH_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const MAX_REFRESH_TOKENS = 10;
 

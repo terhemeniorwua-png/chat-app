@@ -3,7 +3,7 @@
 import { useRef, useState } from 'react';
 import { useTheme } from '@/context/ThemeContext';
 import { useSession } from '@/hooks/useSession';
-import { updateActiveAvatar } from '@/lib/session';
+import { reanchorRememberedPassword, updateActiveAvatar } from '@/lib/session';
 import { apiPost, apiPut } from '@/lib/api';
 import { validateUsername } from '@/lib/validation';
 import ThemeToggle from '@/components/ThemeToggle';
@@ -189,6 +189,9 @@ export default function SettingsView() {
         username: username.trim().toLowerCase(),
       });
       refreshSessionUser(data.user);
+      // Re-anchor the device credential so a later "Save Credentials & Logout"
+      // vaults the current username/identifier + password, not the stale ones.
+      reanchorRememberedPassword(data.user, verifyPassword);
       setVerifyPassword('');
       showToast('Account information updated.');
     } catch (err) {
@@ -225,6 +228,9 @@ export default function SettingsView() {
         currentPassword,
         newPassword,
       });
+      // Re-anchor the device credential: the saved password is now stale, so a
+      // later "Save Credentials & Logout" must vault the new one.
+      reanchorRememberedPassword(user, newPassword);
       setCurrentPassword('');
       setNewPassword('');
       setConfirmPassword('');

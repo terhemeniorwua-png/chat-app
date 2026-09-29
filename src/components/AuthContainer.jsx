@@ -262,8 +262,7 @@ export default function AuthContainer({
     }
   }
 
-  function handleForgetDevice(userId, e) {
-    e.stopPropagation();
+  function handleForgetDevice(userId) {
     remove(userId);
   }
 
@@ -314,54 +313,59 @@ export default function AuthContainer({
                   const fast = canFastAuth(profile);
                   return (
                     <li key={profile.userId} className="shrink-0">
-                      <motion.button
-                        type="button"
-                        whileTap={{ scale: 0.97 }}
-                        disabled={busy}
-                        onClick={() => handleSavedProfileTap(profile)}
-                        className="group relative flex items-center gap-2 rounded-2xl border border-gray-200 bg-[var(--luna-surface-2)] py-1.5 pl-1.5 pr-3 text-left transition hover:border-[#7C3AED]/60 dark:border-white/10 dark:bg-gray-800/60 disabled:opacity-70"
+                      <motion.div
+                        whileTap={busy ? false : { scale: 0.97 }}
+                        className="group relative flex items-center gap-1 rounded-2xl border border-gray-200 bg-[var(--luna-surface-2)] py-1.5 pl-1.5 pr-3 transition hover:border-[#7C3AED]/60 dark:border-white/10 dark:bg-gray-800/60"
                       >
-                        {profile.avatarUrl ? (
-                          <img
-                            src={profile.avatarUrl}
-                            alt=""
-                            className="h-8 w-8 shrink-0 rounded-full object-cover"
-                          />
-                        ) : (
-                          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#7C3AED]/40 text-sm font-bold text-white">
-                            {profile.displayName.charAt(0).toUpperCase()}
-                          </div>
-                        )}
-                        <span className="min-w-0">
-                          <span className="block max-w-[7rem] truncate text-xs font-semibold text-gray-900 dark:text-white">
-                            {profile.displayName}
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() => handleSavedProfileTap(profile)}
+                          aria-label={`Sign in as ${profile.displayName}`}
+                          className="flex min-w-0 flex-1 items-center gap-2 text-left disabled:opacity-70"
+                        >
+                          {profile.avatarUrl ? (
+                            <img
+                              src={profile.avatarUrl}
+                              alt=""
+                              className="h-8 w-8 shrink-0 rounded-full object-cover"
+                            />
+                          ) : (
+                            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#7C3AED]/40 text-sm font-bold text-white">
+                              {profile.displayName.charAt(0).toUpperCase()}
+                            </div>
+                          )}
+                          <span className="min-w-0">
+                            <span className="block max-w-[7rem] truncate text-xs font-semibold text-gray-900 dark:text-white">
+                              {profile.displayName}
+                            </span>
+                            <span className="block text-[10px] text-gray-500 dark:text-gray-400">
+                              {fast ? (
+                                <span className="inline-flex items-center gap-0.5 text-[#7C3AED]">
+                                  <Zap className="h-2.5 w-2.5" /> Tap to login
+                                </span>
+                              ) : (
+                                'Password required'
+                              )}
+                            </span>
                           </span>
-                          <span className="block text-[10px] text-gray-500 dark:text-gray-400">
-                            {fast ? (
-                              <span className="inline-flex items-center gap-0.5 text-[#7C3AED]">
-                                <Zap className="h-2.5 w-2.5" /> Tap to login
-                              </span>
-                            ) : (
-                              'Password required'
-                            )}
-                          </span>
-                        </span>
+                        </button>
                         <button
                           type="button"
                           aria-label={`Forget ${profile.displayName} on this device`}
                           title="Forget this device"
-                          onClick={(e) => handleForgetDevice(profile.userId, e)}
-                          className="rounded-full p-1 text-gray-400 transition hover:bg-[#EF4444]/15 hover:text-[#F87171]"
+                          onClick={() => handleForgetDevice(profile.userId)}
+                          className="shrink-0 rounded-full p-1 text-gray-400 transition hover:bg-[#EF4444]/15 hover:text-[#F87171]"
                         >
                           <X className="h-3.5 w-3.5" />
                         </button>
-                        
+
                         {busy && (
                           <span className="absolute inset-0 flex items-center justify-center rounded-2xl bg-white/60 dark:bg-black/40">
                             <Loader2 className="h-4 w-4 animate-spin text-[#7C3AED]" />
                           </span>
                         )}
-                      </motion.button>
+                      </motion.div>
                     </li>
                   );
                 })}

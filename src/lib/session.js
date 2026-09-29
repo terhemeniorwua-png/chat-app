@@ -186,6 +186,41 @@ function getRememberedPassword() {
   }
 }
 
+/**
+ * Returns the device-remembered password ONLY when it belongs to this account
+ * (the remembered identifier matches one of the account's current identifiers).
+ * Guards against one account's remembered credential leaking into another's
+ * profile card; returns undefined otherwise so callers keep existing data.
+ * @param {AuthUser} user
+ * @returns {string|undefined}
+ */
+function rememberedPasswordFor(user) {
+  const remembered = getRememberedPassword();
+  if (!remembered?.password || !remembered.identifier) return undefined;
+  const mine = new Set(
+    [user.phoneNumber, user.username, user.email, user.id]
+      .filter(Boolean)
+      .map((value) => String(value).trim().toLowerCase())
+  );
+  return mine.has(String(remembered.identifier).trim().toLowerCase())
+    ? remembered.password
+    : undefined;
+}
+
+/**
+ * Re-anchors the remembered device credential for this account after a
+ * verified account change (settings password update or username change) so a
+ * later "Save Credentials & Logout" vaults the CURRENT identifiers + password
+ * instead of the (now stale) ones captured at the original sign-in.
+ * @param {AuthUser} user
+ * @param {string} password
+ */
+export function reanchorRememberedPassword(user, password) {
+  if (!user || !password) return;
+  const identifier = user.phoneNumber || user.username || user.email;
+  if (identifier) rememberPassword(identifier, password);
+}
+
 // ---------------------------------------------------------------------------
 // Persisting / vaulting sessions.
 // ---------------------------------------------------------------------------
@@ -222,11 +257,20 @@ export function setActiveRefreshCredential(refreshToken, user) {
   const existing = DeviceProfileManager.getProfile(user.id);
   const consent = existing?.hasSavedCredentials === true;
 
+  // Re-anchor the saved password from the most recently-authenticated
+  // credential for THIS account (identity-guarded) instead of always reusing
+  // the previously-stored one. A settings password change or a fresh re-login
+  // therefore converges the saved profile, rather than leaving the old
+  // password in place and silently re-breaking one-tap sign-in.
+  const password = consent
+    ? rememberedPasswordFor(user) ?? existing?.password
+    : undefined;
+
   DeviceProfileManager.upsertProfile(
     DeviceProfileManager.fromUser(user, {
       hasSavedCredentials: consent,
       refreshToken: consent ? refreshToken : undefined,
-      password: consent ? existing?.password : undefined,
+      password,
     })
   );
 
@@ -304,27 +348,43 @@ export function updateActiveAvatar(updated) {
 /**
  * One-tap sign-in using a profile whose email+password were saved at logout
  * (direct credential sign-in). Accounts without a password (Google / OTP) fall
- * back to the saved refresh credential. On failure the profile card is kept
- * but flagged, so the UI can fall back to a password/OTP prompt without losing
- * the saved metadata.
+ * back to the saved refresh credential. When a saved password no longer
+ * authenticates (e.g. it was changed in Settings) the still-valid refresh
+ * credential is tried before the card is flagged, so one-tap sign-in keeps
+ * working. On total failure the profile card is kept but flagged, so the UI
+ * can fall back to a password/OTP prompt without losing the saved metadata.
  * @param {StoredProfile} profile
  * @returns {Promise<AuthSession>}
  */
 export async function fastAuthLogin(profile) {
   const savedIdentifier = profile.identifier || profile.email || profile.username;
   try {
-    const payload = savedIdentifier && profile.password
-      ? await authPost('/api/auth/login', {
+    let payload;
+    if (savedIdentifier && profile.password) {
+      try {
+        payload = await authPost('/api/auth/login', {
           identifier: savedIdentifier,
           password: profile.password,
-        })
-      : profile.refreshToken
-        ? await refreshWith(profile.refreshToken)
-        : Promise.reject(
-            new SessionError('No saved credentials for this account.', {
-              status: 401,
-            })
-          );
+        });
+      } catch (err) {
+        // A network error is a genuine outage — never paper over it. Any other
+        // failure only means the stored password is stale, so fall back to the
+        // account's still-valid refresh credential before flagging the card.
+        if (err instanceof SessionError && err.code === 'network') throw err;
+        if (!profile.refreshToken) throw err;
+        try {
+          payload = await refreshWith(profile.refreshToken);
+        } catch {
+          throw err;
+        }
+      }
+    } else if (profile.refreshToken) {
+      payload = await refreshWith(profile.refreshToken);
+    } else {
+      throw new SessionError('No saved credentials for this account.', {
+        status: 401,
+      });
+    }
     return persistAuthSession(payload);
   } catch (err) {
     DeviceProfileManager.flagInvalidCredentials(profile.userId);
